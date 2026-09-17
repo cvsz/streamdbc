@@ -1,0 +1,145 @@
+server:
+  host: "0.0.0.0"
+  http_port: 8085
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+  stream_ttl: 24h
+
+rtmp:
+  enable: true
+  host: "0.0.0.0"
+  port: 1935
+  read_timeout: 30s
+  write_timeout: 30s
+
+rtsp:
+  enable: false
+  host: "0.0.0.0"
+  port: 8554
+  read_timeout: 30s
+
+srt:
+  enable: false
+  host: "0.0.0.0"
+  port: 9000
+  latency: 200ms
+  passphrase: ""
+
+webrtc:
+  enable: false
+  host: "0.0.0.0"
+  port: 8443
+  use_turn: false
+  tls_enabled: false
+  cert_file: ""
+  key_file: ""
+
+hls:
+  enable: true
+  path: "/tmp/hls"
+  segment_duration: 2s
+  playlist_size: 5
+
+llhls:
+  enable: false
+  path: "/tmp/llhls"
+  segment_duration: 1s
+  part_duration: 200ms
+  playlist_size: 10
+
+rtmp_output:
+  enable: false
+  host: "0.0.0.0"
+  port: 1936
+  read_timeout: 30s
+
+rtsp_output:
+  enable: false
+  host: "0.0.0.0"
+  port: 8555
+  read_timeout: 30s
+
+srt_output:
+  enable: false
+  host: "0.0.0.0"
+  port: 9001
+  latency: 200ms
+
+dvr:
+  enable: false
+  path: "/tmp/dvr"
+  max_duration: 4h
+  format: "mpegts"
+
+api:
+  enable: true
+  base_path: "/api/v1"
+  cors_origins:
+    - "*"
+
+logging:
+  level: "info"
+  format: "json"
+  output_path: "stdout"
+
+metrics:
+  enable: true
+  path: "/metrics"
+
+recorder:
+  enable: false
+  path: "/tmp/recordings"
+  ffmpeg_path: "ffmpeg"
+
+auth:
+  enable: false
+  jwt_secret: "gBjw2T7zrSqVBb7nsh9HJ9PD/vD74ySl1/u3YdtkIy/cI5Eq/kfjbyqjimtA36jr"
+  jwt_expiry: "24h"
+  api_keys:
+    - "ogggLnRIcDaaAPiT75SAuMciMcAtSN9Ztptt3bti6oYD/mSs"
+  allow_anonymous: true
+
+redis:
+  enable: false
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
+  prefix: "stremdbc:"
+
+postgres:
+  enable: false
+  host: "localhost"
+  port: 5432
+  user: "stremdbc"
+  password: ""
+  database: "stremdbc"
+  ssl_mode: "disable"
+
+cluster:
+  enable: false
+  node_id: "zlive-zeaz-node"
+  advertise_host: ""
+  discovery_addr: ""
+  health_check_interval: 5s
+
+transcoder:
+  enable: false
+  worker_count: 2
+  ffmpeg_path: "ffmpeg"
+  gpu_enabled: false
+  output_format: "hls"
+  abr_ladder:
+    - name: "720p"
+      width: 1280
+      height: 720
+      bitrate: 3000000
+      frame_rate: 30
+      audio_bitrate: 128000
+    - name: "480p"
+      width: 854
+      height: 480
+      bitrate: 1500000
+      frame_rate: 30
+      audio_bitrate: 96000
