@@ -1,0 +1,28 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+  fetchHealth: (serverUrl) => ipcRenderer.invoke('fetch-health', serverUrl),
+  fetchStreams: (serverUrl) => ipcRenderer.invoke('fetch-streams', serverUrl),
+  createStream: (data) => ipcRenderer.invoke('create-stream', data),
+  deleteStream: (data) => ipcRenderer.invoke('delete-stream', data),
+  getAuthToken: (data) => ipcRenderer.invoke('get-auth-token', data),
+  openPlayer: (streamId) => ipcRenderer.send('open-player', streamId),
+  checkUpdates: () => ipcRenderer.send('check-updates'),
+  showNotification: (data) => ipcRenderer.invoke('show-notification', data),
+  showError: (data) => ipcRenderer.invoke('show-error', data),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  minimizeToTray: () => ipcRenderer.send('minimize-to-tray'),
+  onSettingsUpdated: (callback) => ipcRenderer.on('settings-updated', (event, data) => callback(data)),
+  onHealthUpdated: (callback) => ipcRenderer.on('health-updated', (event, data) => callback(data)),
+  onStreamsUpdated: (callback) => ipcRenderer.on('streams-updated', (event, data) => callback(data)),
+  onOpenSettings: (callback) => ipcRenderer.on('open-settings', () => callback()),
+  onCreateStream: (callback) => ipcRenderer.on('create-stream', () => callback()),
+  onPushRtmp: (callback) => ipcRenderer.on('push-rtmp', () => callback()),
+  onUpdateAvailable: (callback) => ipcRenderer.on('update-available', (event, data) => callback(data)),
+  onUpdateChecked: (callback) => ipcRenderer.on('update-checked', () => callback()),
+  offSettingsUpdated: (callback) => ipcRenderer.removeListener('settings-updated', callback),
+  offHealthUpdated: (callback) => ipcRenderer.removeListener('health-updated', callback),
+  offStreamsUpdated: (callback) => ipcRenderer.removeListener('streams-updated', callback),
+});

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>STREMDBC Client</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <div class="header-left">
+        <div class="logo">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+            <rect x="2" y="6" width="24" height="16" rx="3" stroke="#667eea" stroke-width="2"/>
+            <polygon points="11,10 11,18 18,14" fill="#667eea"/>
+          </svg>
+        </div>
+        <div class="header-title">
+          <h1>STREMDBC Client</h1>
+          <span class="subtitle">Streaming Management & Control Plane</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="server-status" id="serverStatus">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">Connecting...</span>
+        </div>
+        <button class="btn btn-icon" id="refreshBtn" title="Refresh">↻</button>
+        <button class="btn btn-icon" id="settingsBtn" title="Settings">⚙</button>
+        <button class="btn btn-icon" id="trayBtn" title="Minimize to Tray">▭</button>
+      </div>
+    </header>
+
+    <nav class="app-nav" id="appNav">
+      <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+      <button class="nav-btn" data-view="streams">Streams</button>
+      <button class="nav-btn" data-view="player">Player</button>
+      <button class="nav-btn" data-view="settings">Settings</button>
+    </nav>
+
+    <main class="app-main">
+      <section class="view active" id="dashboardView">
+        <div class="summary-grid">
+          <div class="summary-card">
+            <div class="label">Streams</div>
+            <div class="value" id="dashStreams">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Live</div>
+            <div class="value" id="dashLive">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Viewers</div>
+            <div class="value" id="dashViewers">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Memory</div>
+            <div class="value" id="dashMemory">—</div>
+          </div>
+          <div class="summary-card">
+            <div class="label">Uptime</div>
+            <div class="value" id="dashUptime">—</div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <h2>Live Streams</h2>
+            <div class="actions">
+              <button class="btn btn-primary" id="createStreamBtn">+ Create Stream</button>
+              <button class="btn" id="refreshDashBtn">Refresh</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>ID</th>
+                  <th>State</th>
+                  <th>Viewers</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="streamTableBody">
+                <tr><td colspan="6" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <h2>System</h2>
+            <span class="muted" id="lastUpdate">Not updated</span>
+          </div>
+          <div class="components-grid" id="componentsGrid">
+            <div class="card">Waiting for data...</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="streamsView">
+        <div class="section">
+          <div class="section-head">
+            <h2>All Streams</h2>
+            <div class="actions">
+              <button class="btn btn-primary" id="createStreamBtn2">+ Create Stream</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>ID</th>
+                  <th>State</th>
+                  <th>Bitrate</th>
+                  <th>Viewers</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="allStreamsBody">
+                <tr><td colspan="7" class="empty">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="playerView">
+        <div class="section">
+          <div class="section-head">
+            <h2>Stream Player</h2>
+          </div>
+          <div class="player-container">
+            <video id="mainPlayer" controls autoplay></video>
+            <div class="loading" id="playerLoading">Select a stream to play</div>
+          </div>
+          <div class="player-controls">
+            <select id="streamSelect" class="stream-select">
+              <option value="">Select a stream...</option>
+            </select>
+            <button class="btn btn-primary" id="playBtn">Play</button>
+            <button class="btn" id="stopBtn">Stop</button>
+          </div>
+          <div class="player-info" id="playerInfo"></div>
+        </div>
+      </section>
+
+      <section class="view" id="settingsView">
+        <div class="section">
+          <div class="section-head">
+            <h2>Settings</h2>
+          </div>
+          <div class="settings-form">
+            <div class="form-group">
+              <label for="serverUrl">Server URL</label>
+              <input type="url" id="serverUrl" placeholder="http://localhost:8085">
+              <span class="hint">URL of your STREMDBC server</span>
+            </div>
+            <div class="form-group">
+              <label for="apiKey">API Key</label>
+              <input type="password" id="apiKey" placeholder="Your API key">
+              <span class="hint">Required when authentication is enabled</span>
+            </div>
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="notifications">
+                Enable Notifications
+              </label>
+            </div>
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="minimizeToTray">
+                Minimize to Tray
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" id="saveSettingsBtn">Save Settings</button>
+              <button class="btn" id="testConnectionBtn">Test Connection</button>
+            </div>
+            <div class="settings-status" id="settingsStatus"></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <h2>About</h2>
+          </div>
+          <div class="about-card">
+            <p><strong>STREMDBC Client</strong> v1.0.0</p>
+            <p>Streaming management control plane GUI client</p>
+            <p>Connects to STREMDBC server for stream management, monitoring, and playback.</p>
+            <div class="about-links">
+              <a href="#" id="docsLink">Documentation</a>
+              <a href="#" id="issuesLink">Report Issue</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="modal-overlay" id="createStreamModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Create Stream</h3>
+          <button class="btn btn-icon" id="closeModal">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="newStreamId">Stream ID</label>
+            <input type="text" id="newStreamId" placeholder="my-stream" pattern="[A-Za-z0-9._-]+" maxlength="64">
+            <span class="hint">URL-safe ASCII, max 64 characters</span>
+          </div>
+          <div class="form-group">
+            <label for="newStreamName">Name</label>
+            <input type="text" id="newStreamName" placeholder="My Stream">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" id="confirmCreateStream">Create</button>
+          <button class="btn" id="cancelCreateStream">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="rtmpModal">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Push RTMP Stream</h3>
+          <button class="btn btn-icon" id="closeRtmpModal">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="rtmpStreamId">Stream ID</label>
+            <input type="text" id="rtmpStreamId" placeholder="my-stream">
+          </div>
+          <div class="form-group">
+            <label>RTMP Push URL</label>
+            <input type="text" id="rtmpUrl" readonly>
+            <span class="hint">Use this URL in your RTMP encoder</span>
+          </div>
+          <div class="form-group">
+            <label>Stream Key</label>
+            <input type="text" id="rtmpKey" readonly>
+            <span class="hint">Use this as the stream key in your RTMP encoder</span>
+          </div>
+          <div class="form-group">
+            <label>Supported Encoders</label>
+            <div class="encoder-list">
+              <div class="encoder-item">
+                <strong>vMix</strong>: Output → RTMP → URL above
+              </div>
+              <div class="encoder-item">
+                <strong>OBS Studio</strong>: Settings → Stream → Custom → URL above
+              </div>
+              <div class="encoder-item">
+                <strong>ffmpeg</strong>: <code>ffmpeg -i input -f flv URL</code>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" id="copyRtmpBtn">Copy URL</button>
+          <button class="btn" id="closeRtmpBtn">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

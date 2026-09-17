@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>STREMDBC Player</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #0a0a1a;
+      color: #e5edf8;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    .header {
+      width: 100%;
+      max-width: 960px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .header h1 { font-size: 20px; font-weight: 600; }
+    .back-btn {
+      background: #1a1a2e;
+      color: #e5edf8;
+      border: 1px solid #31425f;
+      border-radius: 6px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .back-btn:hover { background: #252540; }
+    .player-wrapper {
+      width: 100%;
+      max-width: 960px;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      aspect-ratio: 16/9;
+      position: relative;
+    }
+    video { width: 100%; height: 100%; display: block; }
+    .loading {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      color: #8ea2bf;
+      font-size: 18px;
+    }
+    .stream-info {
+      width: 100%;
+      max-width: 960px;
+      margin-top: 16px;
+      padding: 16px 20px;
+      background: #1a1a2e;
+      border-radius: 12px;
+    }
+    .stream-info h2 { font-size: 18px; margin-bottom: 4px; }
+    .stream-info p { font-size: 13px; color: #8ea2bf; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 12px;
+      width: 100%;
+      max-width: 960px;
+      margin-top: 12px;
+    }
+    .stat-item {
+      text-align: center;
+      padding: 12px;
+      background: #1a1a2e;
+      border-radius: 8px;
+    }
+    .stat-value { font-size: 22px; font-weight: 600; color: #667eea; }
+    .stat-label { font-size: 11px; color: #8ea2bf; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>STREMDBC Player</h1>
+    <button class="back-btn" id="backBtn">← Back to Dashboard</button>
+  </div>
+
+  <div class="player-wrapper">
+    <video id="videoPlayer" controls autoplay></video>
+    <div class="loading" id="loading">Loading stream...</div>
+  </div>
+
+  <div class="stream-info">
+    <h2 id="streamTitle">Loading...</h2>
+    <p id="streamDescription">Fetching stream information</p>
+  </div>
+
+  <div class="stats">
+    <div class="stat-item">
+      <div class="stat-value" id="viewersCount">-</div>
+      <div class="stat-label">Viewers</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value" id="bitrateValue">-</div>
+      <div class="stat-label">Bitrate</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-value" id="stateValue">-</div>
+      <div class="stat-label">State</div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const streamId = params.get('stream') || '';
+    const serverUrl = params.get('server') || 'http://localhost:8085';
+
+    document.title = `STREMDBC Player - ${streamId || 'Stream'}`;
+
+    const elements = {
+      video: document.getElementById('videoPlayer'),
+      loading: document.getElementById('loading'),
+      title: document.getElementById('streamTitle'),
+      description: document.getElementById('streamDescription'),
+      viewers: document.getElementById('viewersCount'),
+      bitrate: document.getElementById('bitrateValue'),
+      state: document.getElementById('stateValue'),
+      backBtn: document.getElementById('backBtn')
+    };
+
+    let hls = null;
+    let refreshInterval = null;
+
+    function escapeHtml(str) {
+      if (typeof str !== 'string') return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    async function loadStreamInfo() {
+      if (!streamId) {
+        elements.title.textContent = 'No stream selected';
+        elements.loading.style.display = 'none';
+        return;
+      }
+
+      try {
+        const response = await fetch(`${serverUrl}/api/v1/streams/${encodeURIComponent(streamId)}`);
+        if (!response.ok) throw new Error('Stream not found');
+        const data = await response.json();
+
+        elements.title.textContent = data.name || streamId;
+        elements.description.textContent = `Stream ID: ${data.id} • Created: ${new Date(data.created_at).toLocaleString()}`;
+        elements.viewers.textContent = data.viewers || 0;
+        elements.bitrate.textContent = data.bitrate ? `${(data.bitrate / 1000000).toFixed(1)} Mbps` : '-';
+        elements.state.textContent = data.state || 'UNKNOWN';
+
+        if (data.state === 'LIVE') {
+          elements.loading.style.display = 'none';
+        }
+      } catch (err) {
+        elements.title.textContent = streamId;
+        elements.description.textContent = 'Stream information unavailable';
+      }
+    }
+
+    function initPlayer() {
+      if (!streamId) {
+        elements.loading.textContent = 'No stream selected';
+        elements.loading.style.display = 'block';
+        return;
+      }
+
+      const hlsUrl = `${serverUrl}/hls/${encodeURIComponent(streamId)}/index.m3u8`;
+      elements.loading.style.display = 'block';
+
+      if (window.Hls && Hls.isSupported()) {
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 90
+        });
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(elements.video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          elements.loading.style.display = 'none';
+          elements.video.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (data.fatal) {
+            elements.loading.style.display = 'none';
+            elements.loading.textContent = 'Failed to load stream';
+          }
+        });
+      } else if (elements.video.canPlayType('application/vnd.apple.mpegurl')) {
+        elements.video.src = hlsUrl;
+        elements.video.addEventListener('loadedmetadata', () => {
+          elements.loading.style.display = 'none';
+          elements.video.play().catch(() => {});
+        });
+      } else {
+        elements.loading.style.display = 'none';
+        elements.loading.textContent = 'HLS playback not supported';
+      }
+    }
+
+    elements.backBtn.addEventListener('click', () => {
+      if (window.electronAPI) {
+        window.electronAPI.openExternal('index.html').catch(() => {
+          window.location.href = 'index.html';
+        });
+      } else {
+        window.location.href = 'index.html';
+      }
+    });
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadStreamInfo();
+      initPlayer();
+      refreshInterval = setInterval(loadStreamInfo, 5000);
+    });
+
+    window.addEventListener('beforeunload', () => {
+      if (refreshInterval) clearInterval(refreshInterval);
+      if (hls) hls.destroy();
+    });
+  </script>
+</body>
+</html>

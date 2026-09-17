@@ -1,0 +1,4 @@
+# STREMDBC Client build artifacts
+client/dist/
+client/node_modules/
+client/build/
