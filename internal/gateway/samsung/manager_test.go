@@ -80,6 +80,13 @@ func TestManagerStartDuplicateStartAndGracefulStop(t *testing.T) {
 	}
 	child := waitForProcess(t, runner)
 	waitForState(t, manager, StateLive)
+	playlistPath := filepath.Join(manager.cfg.OutputPath, "index.m3u8")
+	if err := os.WriteFile(playlistPath, []byte("#EXTM3U\n"), 0o600); err != nil {
+		t.Fatalf("write synthetic live playlist: %v", err)
+	}
+	if status := manager.Status(); !status.PlaylistReady {
+		t.Fatalf("live gateway should report its playlist ready: %+v", status)
+	}
 	if err := manager.Start(); !errors.Is(err, ErrAlreadyStarted) {
 		t.Fatalf("duplicate Start error = %v, want %v", err, ErrAlreadyStarted)
 	}
@@ -94,6 +101,9 @@ func TestManagerStartDuplicateStartAndGracefulStop(t *testing.T) {
 		t.Fatal("Stop did not cancel the FFmpeg process context")
 	}
 	waitForState(t, manager, StateStopped)
+	if status := manager.Status(); status.PlaylistReady {
+		t.Fatalf("stopped gateway must not report a stale playlist as ready: %+v", status)
+	}
 	if err := manager.Stop(ctx); err != nil {
 		t.Fatalf("repeated Stop: %v", err)
 	}

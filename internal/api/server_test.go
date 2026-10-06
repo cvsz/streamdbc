@@ -12,6 +12,7 @@ import (
 	"github.com/cvsz/stremdbc/internal/auth"
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
+	samsunggateway "github.com/cvsz/stremdbc/internal/gateway/samsung"
 	"github.com/cvsz/stremdbc/internal/metrics"
 	"go.uber.org/zap"
 )
@@ -300,6 +301,20 @@ func TestSamsungTVPagesAndReadOnlyStatus(t *testing.T) {
 	}
 }
 
+func TestSamsungTVStatusHasStablePathWhenAPIBasePathChanges(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.API.BasePath = "/management/v2"
+	server := NewServer(&cfg.API, core.NewStreamRegistry(cfg), metrics.NewMetrics(), zap.NewNop())
+	server.SetSamsungTV(nil, cfg.SamsungTV, t.TempDir())
+	for _, path := range []string{"/tv/status", "/management/v2/tv/status"} {
+		res := httptest.NewRecorder()
+		server.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
+		if res.Code != http.StatusOK {
+			t.Errorf("GET %s returned %d: %s", path, res.Code, res.Body.String())
+		}
+	}
+}
+
 func TestSamsungTVHLSRouteEnforcesNamesMethodsAndCacheHeaders(t *testing.T) {
 	server := newTestServer(t)
 	webDir := t.TempDir()
@@ -316,6 +331,7 @@ func TestSamsungTVHLSRouteEnforcesNamesMethodsAndCacheHeaders(t *testing.T) {
 	cfg.Enable = true
 	cfg.OutputPath = outputDir
 	server.SetSamsungTV(nil, cfg, webDir)
+	registerTestSamsungHLSRoute(server, outputDir)
 
 	for _, test := range []struct {
 		path        string
@@ -374,6 +390,7 @@ func TestSamsungTVHLSRouteReturnsNotFoundBeforePlaylistExists(t *testing.T) {
 	cfg.Enable = true
 	cfg.OutputPath = t.TempDir()
 	server.SetSamsungTV(nil, cfg, t.TempDir())
+	registerTestSamsungHLSRoute(server, cfg.OutputPath)
 	res := httptest.NewRecorder()
 	server.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/tv/live/index.m3u8", nil))
 	if res.Code != http.StatusNotFound {
@@ -414,6 +431,36 @@ func TestSamsungTVMutationsRequireAPIKeyAndRejectUnknownBodyFields(t *testing.T)
 	}
 }
 
+func TestSamsungTVManagementKeysWorkWhenGeneralAuthIsDisabled(t *testing.T) {
+	server := newTestServer(t)
+	validator, err := auth.NewAPIKeyValidator([]string{"secret-key-123456"})
+	if err != nil {
+		t.Fatalf("new API-key-only validator: %v", err)
+	}
+	server.SetTVManagementKeyValidator(validator)
+	cfg := config.DefaultConfig().SamsungTV
+	manager, err := samsunggateway.NewManager(&cfg, nil)
+	if err != nil {
+		t.Fatalf("create disabled Samsung gateway: %v", err)
+	}
+	server.SetSamsungTV(manager, cfg, t.TempDir())
+	request := func(key string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/tv/start", strings.NewReader(`{}`))
+		if key != "" {
+			req.Header.Set("X-API-Key", key)
+		}
+		res := httptest.NewRecorder()
+		server.Handler().ServeHTTP(res, req)
+		return res
+	}
+	if res := request(""); res.Code != http.StatusUnauthorized {
+		t.Fatalf("TV management without key returned %d", res.Code)
+	}
+	if res := request("secret-key-123456"); res.Code != http.StatusConflict {
+		t.Fatalf("valid API key did not reach the disabled gateway state check: %d %s", res.Code, res.Body.String())
+	}
+}
+
 func TestSamsungTVHLSRouteCannotEscapeThroughSymlink(t *testing.T) {
 	server := newTestServer(t)
 	root := t.TempDir()
@@ -428,11 +475,16 @@ func TestSamsungTVHLSRouteCannotEscapeThroughSymlink(t *testing.T) {
 	cfg.Enable = true
 	cfg.OutputPath = root
 	server.SetSamsungTV(nil, cfg, t.TempDir())
+	registerTestSamsungHLSRoute(server, root)
 	res := httptest.NewRecorder()
 	server.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/tv/live/segment_000001.ts", nil))
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("symlink escape returned %d: %s", res.Code, res.Body.String())
 	}
+}
+
+func registerTestSamsungHLSRoute(server *Server, outputPath string) {
+	server.registerRoute("/tv/live/", samsungHLShandler(outputPath, func() bool { return true }, server))
 }
 
 func TestSamsungTVStartRequiresBoundedEmptyJSONBody(t *testing.T) {

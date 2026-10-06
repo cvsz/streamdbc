@@ -76,6 +76,7 @@ func run() (runErr error) {
 		hlsManager       *hls.OutputManager
 		llhlsManager     *llhls.Manager
 		authManager      *auth.Manager
+		tvManagementKeys *auth.APIKeyValidator
 		recManager       *recorder.Manager
 		dvrManager       *dvr.Manager
 		transManager     *transcoder.Manager
@@ -131,6 +132,11 @@ func run() (runErr error) {
 			return fmt.Errorf("create auth manager: %w", err)
 		}
 		logger.Info("authentication enabled", zap.Bool("allow_anonymous", cfg.Auth.AllowAnonymous))
+	} else if cfg.SamsungTV.Enable {
+		tvManagementKeys, err = auth.NewAPIKeyValidator(cfg.Auth.APIKeys)
+		if err != nil {
+			return fmt.Errorf("configure Samsung TV management API keys: %w", err)
+		}
 	}
 
 	if cfg.Recorder.Enable {
@@ -242,6 +248,7 @@ func run() (runErr error) {
 	apiServer.SetHTTPTimeouts(cfg.Server.ReadTimeout, cfg.Server.WriteTimeout, cfg.Server.IdleTimeout)
 	apiServer.SetMetricsConfig(cfg.Metrics.Enable, cfg.Metrics.Path)
 	apiServer.SetAuthManager(authManager)
+	apiServer.SetTVManagementKeyValidator(tvManagementKeys)
 	hlsPath := ""
 	if hlsManager != nil {
 		hlsPath = cfg.HLS.Path

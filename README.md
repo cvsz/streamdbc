@@ -156,6 +156,7 @@ GET    /metrics
 GET    /api/v1/info
 GET    /api/v1/stats
 GET    /api/v1/tv/status
+GET    /tv/status
 POST   /api/v1/tv/start
 POST   /api/v1/tv/stop
 POST   /api/v1/tv/restart

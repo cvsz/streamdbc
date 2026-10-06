@@ -46,6 +46,19 @@ func TestAPIKeyValidation(t *testing.T) {
 	}
 }
 
+func TestAPIKeyValidatorDoesNotRequireJWTConfiguration(t *testing.T) {
+	validator, err := NewAPIKeyValidator([]string{testAPIKey})
+	if err != nil {
+		t.Fatalf("new API-key-only validator: %v", err)
+	}
+	if !validator.Validate(testAPIKey) || validator.Validate("unknown-api-key-123") {
+		t.Fatal("API-key-only validator did not validate the configured key exclusively")
+	}
+	if (*APIKeyValidator)(nil).Validate(testAPIKey) {
+		t.Fatal("nil API-key validator must reject every key")
+	}
+}
+
 func TestNewManagerRejectsInvalidOrMissingAPIKeys(t *testing.T) {
 	for _, keys := range [][]string{nil, []string{""}, []string{"short"}, []string{testAPIKey, testAPIKey}, []string{"bad key with spaces"}, []string{"bad\nkey-123456789"}} {
 		if _, err := NewManager(testSecret, "15m", keys, false); err == nil {

@@ -260,6 +260,13 @@ func TestSamsungTVConfigProfilesAndValidation(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("optional 1080p profile should validate: %v", err)
 	}
+
+	cfg = DefaultConfig()
+	cfg.SamsungTV.Enable = true
+	cfg.SamsungTV.OutputPath = `\\server\share\StreamDBC`
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("UNC subdirectory should validate: %v", err)
+	}
 }
 
 func TestSamsungF5500ExampleConfigLoads(t *testing.T) {
@@ -304,6 +311,7 @@ func TestSamsungTVConfigRejectsUnsafeOrIncompatibleValues(t *testing.T) {
 		{name: "playlist size", mutate: func(cfg *Config) { cfg.SamsungTV.PlaylistSize = 2 }, want: "playlist_size"},
 		{name: "segment duration", mutate: func(cfg *Config) { cfg.SamsungTV.SegmentDuration = 1500 * time.Millisecond }, want: "segment_duration"},
 		{name: "relative output path", mutate: func(cfg *Config) { cfg.SamsungTV.OutputPath = "./hls" }, want: "absolute"},
+		{name: "UNC share root", mutate: func(cfg *Config) { cfg.SamsungTV.OutputPath = `\\server\share` }, want: "network share root"},
 		{name: "empty video device", mutate: func(cfg *Config) { cfg.SamsungTV.VideoDevice = "" }, want: "video_device"},
 		{name: "quoted device", mutate: func(cfg *Config) { cfg.SamsungTV.AudioDevice = `vMix Audio\":audio=other` }, want: "audio_device"},
 		{name: "invalid ffmpeg executable", mutate: func(cfg *Config) { cfg.SamsungTV.FFmpegPath = "-version" }, want: "ffmpeg_path"},

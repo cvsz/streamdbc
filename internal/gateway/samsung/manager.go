@@ -222,6 +222,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 
 func (m *Manager) Status() Status {
 	m.mu.RLock()
+	playlistActive := m.active && m.state == StateLive
 	status := Status{
 		Enabled:      m.cfg.Enable,
 		State:        m.state,
@@ -233,7 +234,7 @@ func (m *Manager) Status() Status {
 		PlaylistPath: filepath.Join(m.cfg.OutputPath, "index.m3u8"),
 	}
 	m.mu.RUnlock()
-	if status.Enabled {
+	if playlistActive {
 		info, err := os.Lstat(status.PlaylistPath)
 		status.PlaylistReady = err == nil && info.Mode().IsRegular() && info.Size() > 0
 	}

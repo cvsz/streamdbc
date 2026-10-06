@@ -103,4 +103,18 @@ func TestSamsungTVSyntheticHTTPPlayback(t *testing.T) {
 	if readErr != nil || response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "video/mp2t" || len(segmentBytes) == 0 {
 		t.Fatalf("unexpected HTTP segment response: status=%d content-type=%q bytes=%d read_error=%v", response.StatusCode, response.Header.Get("Content-Type"), len(segmentBytes), readErr)
 	}
+	if err := manager.Stop(stopContext); err != nil {
+		t.Fatalf("stop synthetic gateway: %v", err)
+	}
+	if status := manager.Status(); status.PlaylistReady || status.State != samsunggateway.StateStopped {
+		t.Fatalf("stopped gateway reports stale playlist readiness: %+v", status)
+	}
+	response, err = client.Get(httpServer.URL + "/tv/live/index.m3u8")
+	if err != nil {
+		t.Fatalf("request stopped gateway playlist: %v", err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("stopped gateway served stale playlist with HTTP %d", response.StatusCode)
+	}
 }

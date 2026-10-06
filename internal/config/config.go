@@ -922,12 +922,16 @@ func validateSamsungOutputPath(value string) error {
 	if !filepath.IsAbs(value) && !windowsAbsolute && !uncAbsolute {
 		return fmt.Errorf("samsung_tv.output_path must be an absolute directory path")
 	}
-	normalized := pathpkg.Clean(strings.ReplaceAll(value, `\`, "/"))
+	portablePath := strings.ReplaceAll(value, `\`, "/")
+	normalized := pathpkg.Clean(portablePath)
+	if uncAbsolute {
+		uncPath := pathpkg.Clean("/" + strings.TrimLeft(portablePath, "/"))
+		if len(strings.Split(strings.Trim(uncPath, "/"), "/")) <= 2 {
+			return fmt.Errorf("samsung_tv.output_path cannot be a network share root")
+		}
+	}
 	if normalized == "." || normalized == "/" || (len(normalized) == 2 && normalized[1] == ':') {
 		return fmt.Errorf("samsung_tv.output_path cannot be a filesystem root")
-	}
-	if strings.HasPrefix(normalized, "//") && len(strings.Split(strings.TrimPrefix(normalized, "//"), "/")) <= 2 {
-		return fmt.Errorf("samsung_tv.output_path cannot be a network share root")
 	}
 	return nil
 }

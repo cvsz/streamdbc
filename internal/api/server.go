@@ -27,36 +27,37 @@ import (
 
 // Server represents the REST and management HTTP server.
 type Server struct {
-	config         *config.APIConfig
-	registry       *core.StreamRegistry
-	metrics        *metrics.Metrics
-	logger         *zap.Logger
-	mux            *http.ServeMux
-	authManager    *auth.Manager
-	httpServer     *http.Server
-	listener       net.Listener
-	startMu        sync.Mutex
-	lifecycleMu    sync.Mutex
-	basePath       string
-	version        string
-	versionMu      sync.RWMutex
-	authMu         sync.RWMutex
-	startedAt      time.Time
-	readTimeout    time.Duration
-	writeTimeout   time.Duration
-	idleTimeout    time.Duration
-	metricsEnabled bool
-	metricsPath    string
-	routeMu        sync.Mutex
-	routes         map[string]struct{}
-	metricsMu      sync.RWMutex
-	componentStats map[string]func() map[string]interface{}
-	statsMu        sync.RWMutex
-	trustedProxies []*net.IPNet
-	rateLimit      int
-	rateMu         sync.Mutex
-	rateEntries    map[string]*rateEntry
-	samsungTV      *samsung.Manager
+	config           *config.APIConfig
+	registry         *core.StreamRegistry
+	metrics          *metrics.Metrics
+	logger           *zap.Logger
+	mux              *http.ServeMux
+	authManager      *auth.Manager
+	tvManagementKeys *auth.APIKeyValidator
+	httpServer       *http.Server
+	listener         net.Listener
+	startMu          sync.Mutex
+	lifecycleMu      sync.Mutex
+	basePath         string
+	version          string
+	versionMu        sync.RWMutex
+	authMu           sync.RWMutex
+	startedAt        time.Time
+	readTimeout      time.Duration
+	writeTimeout     time.Duration
+	idleTimeout      time.Duration
+	metricsEnabled   bool
+	metricsPath      string
+	routeMu          sync.Mutex
+	routes           map[string]struct{}
+	metricsMu        sync.RWMutex
+	componentStats   map[string]func() map[string]interface{}
+	statsMu          sync.RWMutex
+	trustedProxies   []*net.IPNet
+	rateLimit        int
+	rateMu           sync.Mutex
+	rateEntries      map[string]*rateEntry
+	samsungTV        *samsung.Manager
 }
 
 type rateEntry struct {
@@ -118,6 +119,14 @@ func (s *Server) SetAuthManager(am *auth.Manager) {
 	s.authManager = am
 }
 
+// SetTVManagementKeyValidator configures API-key-only authorization for
+// Samsung gateway operations when stream JWT authentication is disabled.
+func (s *Server) SetTVManagementKeyValidator(validator *auth.APIKeyValidator) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.tvManagementKeys = validator
+}
+
 // SetHTTPTimeouts configures the HTTP server timeouts used when Start is called.
 func (s *Server) SetHTTPTimeouts(readTimeout, writeTimeout, idleTimeout time.Duration) {
 	s.startMu.Lock()
@@ -164,6 +173,12 @@ func (s *Server) authManagerSnapshot() *auth.Manager {
 	s.authMu.RLock()
 	defer s.authMu.RUnlock()
 	return s.authManager
+}
+
+func (s *Server) tvManagementKeyValidatorSnapshot() *auth.APIKeyValidator {
+	s.authMu.RLock()
+	defer s.authMu.RUnlock()
+	return s.tvManagementKeys
 }
 
 func (s *Server) versionSnapshot() string {
@@ -238,10 +253,13 @@ func (s *Server) SetSamsungTV(manager *samsung.Manager, cfg config.SamsungTVConf
 		s.registerRoute("/tv/", page("index.html"))
 		s.registerRoute("/tv/basic", page("basic.html"))
 	}
-	if cfg.Enable && cfg.OutputPath != "" {
-		s.registerRoute("/tv/live/", samsungHLShandler(cfg.OutputPath, s))
+	if cfg.Enable && cfg.OutputPath != "" && manager != nil {
+		s.registerRoute("/tv/live/", samsungHLShandler(cfg.OutputPath, func() bool {
+			status := manager.Status()
+			return status.State == samsung.StateLive && status.PlaylistReady
+		}, s))
 	}
-	s.registerRoute(s.basePath+"/tv/status", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	statusHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			s.methodNotAllowed(w)
 			return
@@ -260,7 +278,9 @@ func (s *Server) SetSamsungTV(manager *samsung.Manager, cfg config.SamsungTVConf
 			"last_exit":      status.LastExit,
 			"playlist_ready": status.PlaylistReady,
 		})
-	}))
+	})
+	s.registerRoute(s.basePath+"/tv/status", statusHandler)
+	s.registerRoute("/tv/status", statusHandler)
 	for _, operation := range []string{"start", "stop", "restart"} {
 		action := operation
 		s.registerRoute(s.basePath+"/tv/"+action, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -304,7 +324,7 @@ func (s *Server) SetSamsungTV(manager *samsung.Manager, cfg config.SamsungTVConf
 	}
 }
 
-func samsungHLShandler(outputPath string, server *Server) http.Handler {
+func samsungHLShandler(outputPath string, gatewayLive func() bool, server *Server) http.Handler {
 	root, err := filepath.Abs(outputPath)
 	if err != nil {
 		return http.NotFoundHandler()
@@ -317,6 +337,10 @@ func samsungHLShandler(outputPath string, server *Server) http.Handler {
 		encodedName := strings.TrimPrefix(r.URL.EscapedPath(), "/tv/live/")
 		name, err := url.PathUnescape(encodedName)
 		if err != nil || strings.ContainsAny(name, "/\\\x00") || !validSamsungHLSName(name) {
+			http.NotFound(w, r)
+			return
+		}
+		if gatewayLive == nil || !gatewayLive() {
 			http.NotFound(w, r)
 			return
 		}
@@ -376,11 +400,13 @@ func validSamsungHLSName(name string) bool {
 
 func (s *Server) authorizeTVMutation(w http.ResponseWriter, r *http.Request) bool {
 	manager := s.authManagerSnapshot()
-	if manager == nil {
+	validator := s.tvManagementKeyValidatorSnapshot()
+	if manager == nil && validator == nil {
 		s.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "TV management requires API-key authentication"})
 		return false
 	}
-	if hasValidManagementKey(manager, r.Header.Get("X-API-Key")) {
+	key := r.Header.Get("X-API-Key")
+	if (manager != nil && hasValidManagementKey(manager, key)) || (validator != nil && validator.Validate(key)) {
 		return true
 	}
 	s.unauthorized(w)

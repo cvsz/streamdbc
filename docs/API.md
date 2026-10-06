@@ -48,7 +48,8 @@ When the executable registers its Samsung TV configuration, it serves the
 legacy TV pages at `/tv`, `/tv/`, and `/tv/basic`. When
 `samsung_tv.enable` is true, it also serves HLS media under `/tv/live/`. That
 route accepts only the generated playlist and numbered MPEG-TS segment files
-and allows GET/HEAD only.
+and allows GET/HEAD only. The page-facing JSON status alias `/tv/status` stays
+stable if `api.base_path` is customized.
 
 ### `GET /api/v1/tv/status`
 
@@ -59,10 +60,12 @@ output path or DirectShow device names.
 ### `POST /api/v1/tv/start`, `/stop`, `/restart`
 
 These operations require a valid configured `X-API-Key` even if general API
-authentication is disabled. The body must be exactly one empty JSON object,
-`{}`, and unknown fields are rejected. Start returns `409` if the gateway is
-already running or disabled. The gateway's FFmpeg process is stopped with a
-quit request and a bounded kill fallback.
+authentication is disabled. When it is disabled, configure `auth.api_keys` so
+the server can validate these operation keys without enabling JWT endpoints.
+The body must be exactly one empty JSON object, `{}`, and unknown fields are
+rejected. Start returns `409` if the gateway is already running or disabled.
+The gateway's FFmpeg process is stopped with a quit request and a bounded kill
+fallback.
 
 The F5500 browser cannot provide a stream-scoped playback token, so the sample
 profile enables anonymous HLS playback on the trusted LAN while keeping these
