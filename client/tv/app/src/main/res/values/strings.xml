@@ -17,4 +17,9 @@
     <string name="remove_channel_message">The encrypted saved channel will be deleted from this TV.</string>
     <string name="remove">Remove</string>
     <string name="persist_delete_error">Failed to persist channel deletion</string>
+    <string name="discover_ndi">Discover NDI sources</string>
+    <string name="ndi_none_found">No NDI sources found on this network</string>
+    <string name="ndi_sources_title">NDI sources</string>
+    <string name="ndi_runtime_missing">NDI source discovered, but official NDI runtime is not packaged in this build</string>
+    <string name="ndi_runtime_present">NDI runtime detected; native decode bridge is still gated pending licensed SDK integration</string>
 </resources>
