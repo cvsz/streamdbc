@@ -48,7 +48,17 @@ jobs:
         run: gradle --no-daemon :app:testDebugUnitTest
 
       - name: Lint
-        run: gradle --no-daemon :app:lintDebug
+        shell: bash
+        run: |
+          if ! gradle --no-daemon :app:lintDebug --console=plain; then
+            report="app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt"
+            if [ -f "$report" ]; then
+              echo "::group::Android lint report"
+              cat "$report"
+              echo "::endgroup::"
+            fi
+            exit 1
+          fi
 
       - name: Assemble
         run: gradle --no-daemon :app:assembleDebug
