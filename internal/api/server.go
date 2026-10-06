@@ -51,10 +51,10 @@ type Server struct {
 	metricsMu      sync.RWMutex
 	componentStats map[string]func() map[string]interface{}
 	statsMu        sync.RWMutex
-	trustedProxies  []*net.IPNet
-	rateLimit       int
-	rateMu          sync.Mutex
-	rateEntries     map[string]*rateEntry
+	trustedProxies []*net.IPNet
+	rateLimit      int
+	rateMu         sync.Mutex
+	rateEntries    map[string]*rateEntry
 }
 
 type rateEntry struct {
@@ -102,9 +102,9 @@ func NewServer(cfg *config.APIConfig, registry *core.StreamRegistry, m *metrics.
 		metricsPath:    "/metrics",
 		routes:         make(map[string]struct{}),
 		componentStats: make(map[string]func() map[string]interface{}),
-		trustedProxies:  parseTrustedProxies(cfg.TrustedProxies),
-		rateLimit:       cfg.RateLimitPerMinute,
-		rateEntries:     make(map[string]*rateEntry),
+		trustedProxies: parseTrustedProxies(cfg.TrustedProxies),
+		rateLimit:      cfg.RateLimitPerMinute,
+		rateEntries:    make(map[string]*rateEntry),
 	}
 	s.registerRoutes()
 	return s
