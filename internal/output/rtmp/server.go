@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/policedbc/stremdbc/internal/config"
-	"github.com/policedbc/stremdbc/internal/core"
+	"github.com/cvsz/stremdbc/internal/config"
+	"github.com/cvsz/stremdbc/internal/core"
 	"go.uber.org/zap"
 )
 
