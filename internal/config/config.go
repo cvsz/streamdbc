@@ -119,14 +119,15 @@ type SRTConfig struct {
 }
 
 type WebRTCConfig struct {
-	Enable     bool             `yaml:"enable"`
-	Host       string           `yaml:"host"`
-	Port       int              `yaml:"port"`
-	ICEServer  webrtc.ICEServer `yaml:"ice_server"`
-	UseTURN    bool             `yaml:"use_turn"`
-	TLSEnabled bool             `yaml:"tls_enabled"`
-	CertFile   string           `yaml:"cert_file"`
-	KeyFile    string           `yaml:"key_file"`
+	Enable      bool             `yaml:"enable"`
+	Host        string           `yaml:"host"`
+	Port        int              `yaml:"port"`
+	ICEServer   webrtc.ICEServer `yaml:"ice_server"`
+	UseTURN     bool             `yaml:"use_turn"`
+	TLSEnabled  bool             `yaml:"tls_enabled"`
+	CertFile    string           `yaml:"cert_file"`
+	KeyFile     string           `yaml:"key_file"`
+	CORSOrigins []string         `yaml:"cors_origins"`
 }
 
 type LLHLSConfig struct {
@@ -249,10 +250,11 @@ func DefaultConfig() *Config {
 			Latency: 200 * time.Millisecond,
 		},
 		WebRTC: WebRTCConfig{
-			Enable:     false,
-			Host:       "0.0.0.0",
-			Port:       8443,
-			TLSEnabled: false,
+			Enable:      false,
+			Host:        "0.0.0.0",
+			Port:        8443,
+			TLSEnabled:  false,
+			CORSOrigins: []string{"http://localhost:8080"},
 		},
 		HLS: HLSConfig{
 			Enable:          false,
@@ -493,6 +495,12 @@ func (c *Config) Validate() error {
 	}
 	if err := validatePort("WebRTC", c.WebRTC.Enable, c.WebRTC.Port); err != nil {
 		return err
+	}
+	if err := validateCORSOrigins(c.WebRTC.CORSOrigins); err != nil {
+		return fmt.Errorf("webrtc.cors_origins: %w", err)
+	}
+	if c.WebRTC.Enable && len(c.WebRTC.CORSOrigins) == 0 {
+		return fmt.Errorf("webrtc.cors_origins must contain at least one origin when WebRTC is enabled")
 	}
 	if c.WebRTC.Enable && c.WebRTC.TLSEnabled {
 		if strings.TrimSpace(c.WebRTC.CertFile) == "" || strings.TrimSpace(c.WebRTC.KeyFile) == "" {
