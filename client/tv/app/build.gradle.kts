@@ -37,6 +37,7 @@ android {
 }
 
 dependencies {
+    implementation("androidx.annotation:annotation:1.10.0")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-exoplayer-rtsp:1.11.1")
     implementation("androidx.media3:media3-ui:1.11.1")
