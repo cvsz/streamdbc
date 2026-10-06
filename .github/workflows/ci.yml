@@ -27,19 +27,29 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22"
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
       - name: Generate lockfile
         working-directory: client
         run: npm install --package-lock-only --ignore-scripts
-      - name: Commit lockfile
+      - name: Format changed Go sources
+        run: |
+          gofmt -w internal/api/server.go internal/api/server_test.go
+          gofmt -w internal/config/config.go internal/config/config_test.go
+          gofmt -w internal/ingest/webrtc/server.go internal/ingest/webrtc/server_test.go
+      - name: Commit generated files
         shell: bash
         run: |
-          if git diff --quiet -- client/package-lock.json; then
+          git add client/package-lock.json internal/api internal/config internal/ingest/webrtc
+          if [ -z "$(git status --porcelain)" ]; then
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add client/package-lock.json
-          git commit -m "build(client): lock npm dependency graph"
+          git commit -m "build: generate lockfile and format hardening changes"
           git push origin HEAD:hardening/production-grade-2026-10-06
 
   test:
