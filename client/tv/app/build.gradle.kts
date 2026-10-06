@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace = "dev.zeaz.streamdbc.tv"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "dev.zeaz.streamdbc.tv"
         minSdk = 23
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0.0"
 
@@ -37,7 +37,7 @@ android {
 }
 
 dependencies {
-    implementation("androidx.annotation:annotation:1.10.0")
+    implementation("androidx.annotation:annotation:1.11.0")
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-exoplayer-rtsp:1.11.1")
     implementation("androidx.media3:media3-ui:1.11.1")
