@@ -15,7 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 
 	"github.com/cvsz/stremdbc/internal/auth"
 	"github.com/cvsz/stremdbc/internal/config"
@@ -319,7 +319,7 @@ func (s *Server) handleWHIP(c *gin.Context) {
 		return
 	}
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		s.logger.Info("received WebRTC publisher track", zap.String("stream_id", streamID), zap.String("codec", track.Codec().MimeType))
+		s.logger.Info("received WebRTC publisher track", zap.String("codec", track.Codec().MimeType))
 		s.setLiveIfAvailable(streamID)
 	})
 	if err := pc.SetRemoteDescription(offer); err != nil {
