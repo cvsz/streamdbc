@@ -58,7 +58,7 @@ func TestWebRTCStartFailureDoesNotLeaveServerRunning(t *testing.T) {
 }
 
 func TestWebRTCAnonymousPlaybackDoesNotAuthorizePublishing(t *testing.T) {
-	server, err := NewServer(&config.WebRTCConfig{}, nil, zap.NewNop())
+	server, err := NewServer(&config.WebRTCConfig{CORSOrigins: []string{"https://player.example"}}, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("new WebRTC server: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestWebRTCAnonymousPlaybackDoesNotAuthorizePublishing(t *testing.T) {
 	if response.Code != 401 {
 		t.Fatalf("anonymous WHIP request returned %d: %s", response.Code, response.Body.String())
 	}
-	if response.Header().Get("Access-Control-Allow-Origin") != "*" {
+	if response.Header().Get("Access-Control-Allow-Origin") != "https://player.example" {
 		t.Fatalf("unauthorized WHIP response missing CORS header: %q", response.Header().Get("Access-Control-Allow-Origin"))
 	}
 }
@@ -92,7 +92,7 @@ func TestWebRTCProvidesDeleteSessionCORSPreflight(t *testing.T) {
 	if response.Code != http.StatusNoContent {
 		t.Fatalf("delete preflight returned %d: %s", response.Code, response.Body.String())
 	}
-	if response.Header().Get("Access-Control-Allow-Origin") != "*" {
+	if response.Header().Get("Access-Control-Allow-Origin") != "https://player.example" {
 		t.Fatalf("delete preflight CORS header = %q", response.Header().Get("Access-Control-Allow-Origin"))
 	}
 	if got := response.Header().Values("Access-Control-Allow-Origin"); len(got) != 1 {
