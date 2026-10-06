@@ -98,6 +98,11 @@ public final class MainActivity extends Activity {
 
     private void playCurrent() {
         if (channels.isEmpty()) return;
+        ndiReceiver.stop();
+        ndiSurface.setVisibility(View.GONE);
+        playerView.setVisibility(View.VISIBLE);
+        playback.release();
+        playback = new RtspPlaybackController(this, playerView, value -> runOnUiThread(() -> status.setText(value)));
         if (currentIndex >= channels.size()) currentIndex = 0;
         if (currentIndex < 0) currentIndex = channels.size() - 1;
         StreamConfig channel = channels.get(currentIndex);
@@ -147,25 +152,38 @@ public final class MainActivity extends Activity {
     }
 
     private void discoverNdiSources() {
+        if (ndiReceiver.isAvailable()) {
+            status.setText(R.string.ndi_discovering);
+            new Thread(() -> {
+                String[] discovered = ndiReceiver.listSources();
+                List<String> sources = new ArrayList<>(List.of(discovered));
+                runOnUiThread(() -> showNdiSources(sources));
+            }, "ndi-discovery").start();
+            return;
+        }
+
         ndiDiscovery.start();
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             ndiDiscovery.stop();
-            List<String> sources = ndiDiscovery.snapshot();
-            if (sources.isEmpty()) {
-                showToast(getString(R.string.ndi_none_found));
-                return;
-            }
-            new AlertDialog.Builder(this)
-                    .setTitle(R.string.ndi_sources_title)
-                    .setItems(sources.toArray(new String[0]), (dialog, which) -> {
-                        if (!ndiReceiver.isAvailable()) {
-                            showToast(getString(R.string.ndi_runtime_missing));
-                            return;
-                        }
-                        startNdiSource(sources.get(which));
-                    })
-                    .show();
+            showNdiSources(ndiDiscovery.snapshot());
         }, 2500L);
+    }
+
+    private void showNdiSources(List<String> sources) {
+        if (sources.isEmpty()) {
+            showToast(getString(R.string.ndi_none_found));
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.ndi_sources_title)
+                .setItems(sources.toArray(new String[0]), (dialog, which) -> {
+                    if (!ndiReceiver.isAvailable()) {
+                        showToast(getString(R.string.ndi_runtime_missing));
+                        return;
+                    }
+                    startNdiSource(sources.get(which));
+                })
+                .show();
     }
 
     private void startNdiSource(String sourceName) {
