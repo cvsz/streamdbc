@@ -107,6 +107,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Validate Compose configuration
+        env:
+          STREMDBC_JWT_SECRET: 0123456789abcdef0123456789abcdef
+          STREMDBC_API_KEY: api-key-123456789
+          REDIS_PASSWORD: redis-password-123456789
+          POSTGRES_PASSWORD: postgres-password-123456789
+          GRAFANA_ADMIN_PASSWORD: grafana-password-123456789
+        run: docker compose config --quiet
+
       - name: Build image
         run: docker build --pull -t stremdbc:${{ github.sha }} .
 
