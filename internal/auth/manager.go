@@ -9,9 +9,9 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/cvsz/stremdbc/internal/core"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/cvsz/stremdbc/internal/core"
 )
 
 var (
