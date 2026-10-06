@@ -75,7 +75,7 @@ func NewServer(cfg *config.WebRTCConfig, registry *core.StreamRegistry, logger *
 		logger = zap.NewNop()
 	}
 	copyCfg := *cfg
-	copyCfg.ICEServer.URLs = append([]string(nil), cfg.ICEServer.URLs...)
+	copyCfg.ICEServer.URLs = append([]string(nil), cfg.ICEServer.URLs...)\n\tcopyCfg.CORSOrigins = append([]string(nil), cfg.CORSOrigins...)
 	gin.SetMode(gin.ReleaseMode)
 	meeting := &webrtc.MediaEngine{}
 	if err := meeting.RegisterDefaultCodecs(); err != nil {
@@ -617,9 +617,19 @@ func (s *Server) authorize(c *gin.Context, action, streamID string) bool {
 }
 
 func (s *Server) setCORS(c *gin.Context) {
-	c.Header("Access-Control-Allow-Origin", "*")
-	c.Header("Access-Control-Allow-Methods", "POST, OPTIONS, DELETE")
-	c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	origin := c.GetHeader("Origin")
+	if origin == "" {
+		return
+	}
+	for _, allowed := range s.config.CORSOrigins {
+		if allowed == "*" || allowed == origin {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+			c.Header("Access-Control-Allow-Methods", "POST, OPTIONS, DELETE")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			return
+		}
+	}
 }
 
 func parseSDPOffer(request *http.Request) (webrtc.SessionDescription, bool, error) {
