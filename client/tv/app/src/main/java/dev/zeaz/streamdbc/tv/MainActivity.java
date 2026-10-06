@@ -60,14 +60,14 @@ public final class MainActivity extends Activity {
         try {
             channels.addAll(store.load());
         } catch (Exception e) {
-            showToast("Secure channel storage could not be opened");
+            showToast(getString(R.string.secure_store_error));
         }
 
         playback = new RtspPlaybackController(this, playerView, value -> runOnUiThread(() -> status.setText(value)));
 
         if (channels.isEmpty()) {
             title.setText(getString(R.string.no_channel));
-            status.setText("MENU: manage channels");
+            status.setText(R.string.menu_manage_channels)
             overlay.setVisibility(View.VISIBLE);
         } else {
             playCurrent();
@@ -87,7 +87,7 @@ public final class MainActivity extends Activity {
         if (currentIndex >= channels.size()) currentIndex = 0;
         if (currentIndex < 0) currentIndex = channels.size() - 1;
         StreamConfig channel = channels.get(currentIndex);
-        title.setText(channel.name() + "  ·  " + (currentIndex + 1) + "/" + channels.size());
+        title.setText(getString(R.string.channel_position, channel.name(), currentIndex + 1, channels.size()));
         playback.play(channel);
     }
 
@@ -99,12 +99,12 @@ public final class MainActivity extends Activity {
 
     private void manageChannels() {
         List<String> items = new ArrayList<>();
-        items.add("Add RTSP channel");
-        if (!channels.isEmpty()) items.add("Remove current channel");
-        for (StreamConfig c : channels) items.add("Play · " + c.name());
+        items.add(getString(R.string.add_rtsp_channel));
+        if (!channels.isEmpty()) items.add(getString(R.string.remove_current_channel));
+        for (StreamConfig c : channels) items.add(getString(R.string.play_channel, c.name()));
 
         new AlertDialog.Builder(this)
-                .setTitle("Channels")
+                .setTitle(R.string.channels_title)
                 .setItems(items.toArray(new String[0]), (dialog, which) -> {
                     if (which == 0) {
                         showAddDialog();
@@ -133,21 +133,21 @@ public final class MainActivity extends Activity {
         form.setOrientation(LinearLayout.VERTICAL);
 
         EditText name = new EditText(this);
-        name.setHint("Channel name");
+        name.setHint(R.string.channel_name_hint);
         name.setSingleLine(true);
 
         EditText url = new EditText(this);
-        url.setHint("rtsp://user:password@host:554/path");
+        url.setHint(R.string.rtsp_url_hint);
         url.setSingleLine(true);
 
         form.addView(name);
         form.addView(url);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Add RTSP channel")
+                .setTitle(R.string.add_rtsp_channel)
                 .setView(form)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Save", null)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.save, null)
                 .create();
 
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
@@ -159,7 +159,7 @@ public final class MainActivity extends Activity {
                 dialog.dismiss();
                 playCurrent();
             } catch (Exception e) {
-                showToast(e.getMessage() == null ? "Unable to save channel" : e.getMessage());
+                showToast(e.getMessage() == null ? getString(R.string.unable_save_channel) : e.getMessage());
             }
         }));
         dialog.show();
@@ -169,16 +169,16 @@ public final class MainActivity extends Activity {
         if (channels.isEmpty()) return;
         StreamConfig current = channels.get(currentIndex);
         new AlertDialog.Builder(this)
-                .setTitle("Remove " + current.name() + "?")
-                .setMessage("The encrypted saved channel will be deleted from this TV.")
+                .setTitle(getString(R.string.remove_channel_title, current.name()))
+                .setMessage(R.string.remove_channel_message)
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("Remove", (d, w) -> {
+                .setPositiveButton(R.string.remove, (d, w) -> {
                     channels.remove(currentIndex);
                     if (currentIndex >= channels.size()) currentIndex = Math.max(0, channels.size() - 1);
                     try {
                         store.save(channels);
                     } catch (Exception e) {
-                        showToast("Failed to persist channel deletion");
+                        showToast(getString(R.string.persist_delete_error));
                     }
                     if (channels.isEmpty()) {
                         title.setText(getString(R.string.no_channel));
