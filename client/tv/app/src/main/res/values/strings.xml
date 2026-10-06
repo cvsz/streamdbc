@@ -1,4 +1,20 @@
 <resources>
     <string name="app_name">StreamDBC TV</string>
     <string name="no_channel">Press MENU to add an RTSP channel</string>
+    <string name="menu_manage_channels">MENU: manage channels</string>
+    <string name="channel_position">%1$s · %2$d/%3$d</string>
+    <string name="secure_store_error">Secure channel storage could not be opened</string>
+    <string name="add_rtsp_channel">Add RTSP channel</string>
+    <string name="remove_current_channel">Remove current channel</string>
+    <string name="play_channel">Play · %1$s</string>
+    <string name="channels_title">Channels</string>
+    <string name="channel_name_hint">Channel name</string>
+    <string name="rtsp_url_hint">rtsp://host:554/path</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="unable_save_channel">Unable to save channel</string>
+    <string name="remove_channel_title">Remove %1$s?</string>
+    <string name="remove_channel_message">The encrypted saved channel will be deleted from this TV.</string>
+    <string name="remove">Remove</string>
+    <string name="persist_delete_error">Failed to persist channel deletion</string>
 </resources>
