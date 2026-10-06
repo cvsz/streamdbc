@@ -22,4 +22,6 @@
     <string name="ndi_sources_title">NDI sources</string>
     <string name="ndi_runtime_missing">NDI source discovered, but official NDI runtime is not packaged in this build</string>
     <string name="ndi_runtime_present">NDI runtime detected; native decode bridge is still gated pending licensed SDK integration</string>
+    <string name="ndi_start_failed">Unable to start the selected NDI source</string>
+    <string name="ndi_live">NDI LIVE · %1$s</string>
 </resources>
