@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      API 37 is reported by AGP lint as newer, but platforms;android-37 is not
+      currently available from sdkmanager on the GitHub-hosted Android SDK.
+      Keep compile/target 36 until the platform package is actually publishable
+      in CI; all other lint checks remain errors.
+    -->
+    <issue id="OldTargetApi">
+        <ignore regexp="targetSdk = 36" />
+    </issue>
+    <issue id="GradleDependency">
+        <ignore regexp="compileSdk = 36" />
+    </issue>
+</lint>
