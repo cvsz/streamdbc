@@ -17,12 +17,14 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.media3.common.util.UnstableApi;
 import androidx.media3.ui.PlayerView;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+@UnstableApi
 public final class MainActivity extends Activity {
     private final List<StreamConfig> channels = new ArrayList<>();
     private SecureStreamStore store;

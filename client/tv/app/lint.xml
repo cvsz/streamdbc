@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!--
+      AGP 9.4 lint advertises Android API 37, while sdkmanager on the
+      GitHub-hosted runner does not publish platforms;android-37 yet.
+      The project therefore compiles/targets API 36 until API 37 can be
+      installed and tested in CI. Only these two version-availability checks
+      are suppressed; all other lint findings remain errors.
+    -->
+    <issue id="OldTargetApi" severity="ignore" />
+    <issue id="GradleDependency" severity="ignore" />
+</lint>
