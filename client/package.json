@@ -18,7 +18,7 @@
   "dependencies": {
     "electron-updater": "^6.3.0",
     "node-fetch": "^3.3.2",
-    "hls.js": "1.5.17"
+    "hls.js": "1.7.3"
   },
   "devDependencies": {
     "electron": "^44.4.1",
