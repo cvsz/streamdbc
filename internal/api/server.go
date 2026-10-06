@@ -20,41 +20,44 @@ import (
 	"github.com/cvsz/stremdbc/internal/auth"
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
+	"github.com/cvsz/stremdbc/internal/gateway/samsung"
 	"github.com/cvsz/stremdbc/internal/metrics"
 	"go.uber.org/zap"
 )
 
 // Server represents the REST and management HTTP server.
 type Server struct {
-	config         *config.APIConfig
-	registry       *core.StreamRegistry
-	metrics        *metrics.Metrics
-	logger         *zap.Logger
-	mux            *http.ServeMux
-	authManager    *auth.Manager
-	httpServer     *http.Server
-	listener       net.Listener
-	startMu        sync.Mutex
-	lifecycleMu    sync.Mutex
-	basePath       string
-	version        string
-	versionMu      sync.RWMutex
-	authMu         sync.RWMutex
-	startedAt      time.Time
-	readTimeout    time.Duration
-	writeTimeout   time.Duration
-	idleTimeout    time.Duration
-	metricsEnabled bool
-	metricsPath    string
-	routeMu        sync.Mutex
-	routes         map[string]struct{}
-	metricsMu      sync.RWMutex
-	componentStats map[string]func() map[string]interface{}
-	statsMu        sync.RWMutex
-	trustedProxies []*net.IPNet
-	rateLimit      int
-	rateMu         sync.Mutex
-	rateEntries    map[string]*rateEntry
+	config           *config.APIConfig
+	registry         *core.StreamRegistry
+	metrics          *metrics.Metrics
+	logger           *zap.Logger
+	mux              *http.ServeMux
+	authManager      *auth.Manager
+	tvManagementKeys *auth.APIKeyValidator
+	httpServer       *http.Server
+	listener         net.Listener
+	startMu          sync.Mutex
+	lifecycleMu      sync.Mutex
+	basePath         string
+	version          string
+	versionMu        sync.RWMutex
+	authMu           sync.RWMutex
+	startedAt        time.Time
+	readTimeout      time.Duration
+	writeTimeout     time.Duration
+	idleTimeout      time.Duration
+	metricsEnabled   bool
+	metricsPath      string
+	routeMu          sync.Mutex
+	routes           map[string]struct{}
+	metricsMu        sync.RWMutex
+	componentStats   map[string]func() map[string]interface{}
+	statsMu          sync.RWMutex
+	trustedProxies   []*net.IPNet
+	rateLimit        int
+	rateMu           sync.Mutex
+	rateEntries      map[string]*rateEntry
+	samsungTV        *samsung.Manager
 }
 
 type rateEntry struct {
@@ -116,6 +119,14 @@ func (s *Server) SetAuthManager(am *auth.Manager) {
 	s.authManager = am
 }
 
+// SetTVManagementKeyValidator configures API-key-only authorization for
+// Samsung gateway operations when stream JWT authentication is disabled.
+func (s *Server) SetTVManagementKeyValidator(validator *auth.APIKeyValidator) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.tvManagementKeys = validator
+}
+
 // SetHTTPTimeouts configures the HTTP server timeouts used when Start is called.
 func (s *Server) SetHTTPTimeouts(readTimeout, writeTimeout, idleTimeout time.Duration) {
 	s.startMu.Lock()
@@ -162,6 +173,12 @@ func (s *Server) authManagerSnapshot() *auth.Manager {
 	s.authMu.RLock()
 	defer s.authMu.RUnlock()
 	return s.authManager
+}
+
+func (s *Server) tvManagementKeyValidatorSnapshot() *auth.APIKeyValidator {
+	s.authMu.RLock()
+	defer s.authMu.RUnlock()
+	return s.tvManagementKeys
 }
 
 func (s *Server) versionSnapshot() string {
@@ -215,6 +232,196 @@ func (s *Server) SetStaticRoutes(hlsPath, llhlsPath, playerFile, dashboardDir st
 		}))
 		s.registerRoute("/dashboard/", s.staticHandler("/dashboard/", dashboardDir, false))
 	}
+}
+
+// SetSamsungTV registers the F5500-specific pages, HLS output, and status and
+// management endpoints. The HLS route serves only known generated filenames.
+func (s *Server) SetSamsungTV(manager *samsung.Manager, cfg config.SamsungTVConfig, tvDirectory string) {
+	s.samsungTV = manager
+	page := func(name string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				s.methodNotAllowed(w)
+				return
+			}
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+			serveStaticFile(w, r, filepath.Join(tvDirectory, name))
+		}
+	}
+	if tvDirectory != "" {
+		s.registerRoute("/tv", page("index.html"))
+		s.registerRoute("/tv/", page("index.html"))
+		s.registerRoute("/tv/basic", page("basic.html"))
+	}
+	if cfg.Enable && cfg.OutputPath != "" && manager != nil {
+		s.registerRoute("/tv/live/", samsungHLShandler(cfg.OutputPath, func() bool {
+			status := manager.Status()
+			return status.State == samsung.StateLive && status.PlaylistReady
+		}, s))
+	}
+	statusHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			s.methodNotAllowed(w)
+			return
+		}
+		status := samsung.Status{Enabled: cfg.Enable, State: samsung.StateStopped, Profile: cfg.Profile}
+		if s.samsungTV != nil {
+			status = s.samsungTV.Status()
+		}
+		s.writeJSON(w, http.StatusOK, map[string]interface{}{
+			"enabled":        status.Enabled,
+			"state":          strings.ToLower(status.State),
+			"profile":        status.Profile,
+			"restart_count":  status.RestartCount,
+			"last_error":     status.LastError,
+			"started_at":     status.StartedAt,
+			"last_exit":      status.LastExit,
+			"playlist_ready": status.PlaylistReady,
+		})
+	})
+	s.registerRoute(s.basePath+"/tv/status", statusHandler)
+	s.registerRoute("/tv/status", statusHandler)
+	for _, operation := range []string{"start", "stop", "restart"} {
+		action := operation
+		s.registerRoute(s.basePath+"/tv/"+action, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				s.methodNotAllowed(w)
+				return
+			}
+			if !s.authorizeTVMutation(w, r) || !s.validEmptyObjectBody(w, r) {
+				return
+			}
+			if s.samsungTV == nil {
+				s.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Samsung TV gateway is unavailable"})
+				return
+			}
+			var err error
+			switch action {
+			case "start":
+				err = s.samsungTV.Start()
+			case "stop":
+				stopCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+				err = s.samsungTV.Stop(stopCtx)
+				cancel()
+			case "restart":
+				stopCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+				err = s.samsungTV.Stop(stopCtx)
+				cancel()
+				if err == nil {
+					err = s.samsungTV.Start()
+				}
+			}
+			if errors.Is(err, samsung.ErrAlreadyStarted) || errors.Is(err, samsung.ErrDisabled) {
+				s.writeJSON(w, http.StatusConflict, map[string]string{"error": "Samsung TV gateway cannot perform that operation in its current state"})
+				return
+			}
+			if err != nil {
+				s.internalError(w, "Samsung TV gateway operation failed")
+				return
+			}
+			s.writeJSON(w, http.StatusAccepted, map[string]string{"state": strings.ToLower(s.samsungTV.Status().State)})
+		}))
+	}
+}
+
+func samsungHLShandler(outputPath string, gatewayLive func() bool, server *Server) http.Handler {
+	root, err := filepath.Abs(outputPath)
+	if err != nil {
+		return http.NotFoundHandler()
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			server.methodNotAllowed(w)
+			return
+		}
+		encodedName := strings.TrimPrefix(r.URL.EscapedPath(), "/tv/live/")
+		name, err := url.PathUnescape(encodedName)
+		if err != nil || strings.ContainsAny(name, "/\\\x00") || !validSamsungHLSName(name) {
+			http.NotFound(w, r)
+			return
+		}
+		if gatewayLive == nil || !gatewayLive() {
+			http.NotFound(w, r)
+			return
+		}
+		rootInfo, err := os.Lstat(root)
+		if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
+			http.NotFound(w, r)
+			return
+		}
+		rootHandle, err := os.OpenRoot(root)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer rootHandle.Close()
+		file, err := rootHandle.Open(name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		info, err := file.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			_ = file.Close()
+			http.NotFound(w, r)
+			return
+		}
+		if name == "index.m3u8" {
+			w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		} else {
+			w.Header().Set("Content-Type", "video/mp2t")
+			w.Header().Set("Cache-Control", "public, max-age=2")
+		}
+		requestCopy := r.Clone(r.Context())
+		requestCopy.URL.Path = "/" + name
+		serveOpenedStaticFile(w, requestCopy, file, name, info)
+	})
+}
+
+func validSamsungHLSName(name string) bool {
+	if name == "index.m3u8" {
+		return true
+	}
+	if !strings.HasPrefix(name, "segment_") || !strings.HasSuffix(name, ".ts") {
+		return false
+	}
+	digits := strings.TrimSuffix(strings.TrimPrefix(name, "segment_"), ".ts")
+	if len(digits) < 6 {
+		return false
+	}
+	for _, digit := range digits {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Server) authorizeTVMutation(w http.ResponseWriter, r *http.Request) bool {
+	manager := s.authManagerSnapshot()
+	validator := s.tvManagementKeyValidatorSnapshot()
+	if manager == nil && validator == nil {
+		s.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "TV management requires API-key authentication"})
+		return false
+	}
+	key := r.Header.Get("X-API-Key")
+	if (manager != nil && hasValidManagementKey(manager, key)) || (validator != nil && validator.Validate(key)) {
+		return true
+	}
+	s.unauthorized(w)
+	return false
+}
+
+func (s *Server) validEmptyObjectBody(w http.ResponseWriter, r *http.Request) bool {
+	var request struct{}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	decoder.DisallowUnknownFields()
+	if err := decodeSingleJSON(decoder, &request); err != nil {
+		s.badRequest(w, "body must be an empty JSON object")
+		return false
+	}
+	return true
 }
 
 func (s *Server) registerRoute(pattern string, handler http.Handler) (registered bool) {
@@ -381,7 +588,25 @@ func (s *Server) registerRoutes() {
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.corsMiddleware(s.loggingMiddleware(s.securityHeadersMiddleware(s.rateLimitMiddleware(s.mux))))
+	return s.corsMiddleware(s.loggingMiddleware(s.securityHeadersMiddleware(s.rateLimitMiddleware(rejectPathTraversal(s.mux)))))
+}
+
+func rejectPathTraversal(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, err := url.PathUnescape(r.URL.EscapedPath())
+		if err != nil || strings.ContainsRune(path, '\x00') {
+			http.NotFound(w, r)
+			return
+		}
+		path = strings.ReplaceAll(path, "\\", "/")
+		for _, segment := range strings.Split(path, "/") {
+			if segment == "." || segment == ".." {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) Start(addr string) error {

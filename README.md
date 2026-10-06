@@ -1,14 +1,15 @@
 # STREMDBC
 
 STREMDBC is a Go streaming management control plane with bounded protocol
-adapters and reusable media-output/FFmpeg components.
+adapters, reusable FFmpeg components, and a dedicated Samsung F5500 HLS
+capture gateway for vMix External Output on Windows.
 
 ## Verified scope
 
 The executable in this checkout is production-hardened as a management and
-control service. It is not yet a production media plane: no RTMP/RTP/libsrt
-media engine or ingest-to-output media graph is included. The service therefore
-fails closed rather than claiming that control traffic is media delivery.
+control service. General RTMP/RTP/libsrt ingest-to-output forwarding is not
+included. The Samsung gateway is a separate, concrete capture path from Windows
+DirectShow devices to H.264/AAC MPEG-TS HLS.
 
 | Component | Current contract |
 |---|---|
@@ -20,11 +21,14 @@ fails closed rather than claiming that control traffic is media delivery.
 | WHIP/WHEP | SDP peer negotiation and publisher-track detection; RTP forwarding is unavailable |
 | RTMP/RTSP outputs | Bounded consumer/control endpoints; no outbound media writer |
 | Recorder, DVR, transcoder | Reusable managers; no executable API/media-source wiring |
+| Samsung F5500 gateway | vMix DirectShow capture, H.264/AAC HLS, legacy `/tv` pages; requires Windows device and physical TV validation |
 | Redis cluster | Redis node registration, heartbeat, discovery, and selection primitives |
 | PostgreSQL | Configuration is rejected until schema integration is implemented |
 
 The default configuration keeps all media adapters disabled. Enable an adapter
 only after supplying the corresponding production media engine and integration.
+The Samsung gateway can be enabled independently with
+`configs/samsung-f5500.yaml`.
 
 ## Android TV RTSP client
 
@@ -59,8 +63,8 @@ The debug APK is produced under `client/tv/app/build/outputs/apk/debug/`.
 
 ## Local quick start
 
-Requires Go 1.27 or newer. FFmpeg is required only when using the recorder or
-transcoder library managers.
+Requires Go 1.27 or newer. FFmpeg is required for recorder/transcoder managers
+and the Samsung F5500 gateway.
 
 ```bash
 go test ./...
@@ -70,6 +74,53 @@ go run ./cmd/stremdbc -config configs/config.dev.yaml
 
 The development config binds the API to `127.0.0.1` and leaves authentication
 off. Do not expose it beyond the local machine.
+
+## Samsung F5500 Wi-Fi Output
+
+The Samsung F5500 Wi-Fi playback gateway receives the vMix Program output on
+the Windows host and transcodes it to legacy-compatible H.264/AAC HLS for
+playback by the television over the LAN. The television receives HLS; it does
+not receive NDI. The default profile is 1280x720 at 30 fps with two-second
+MPEG-TS segments and a six-segment playlist. Expected glass-to-glass latency is
+about 6–15 seconds.
+
+```text
+vMix PC
+  ↓ External Output 1 (Program) / vMix Video + vMix Audio
+StreamDBC Samsung Gateway / FFmpeg
+  ↓ H.264 + AAC MPEG-TS HLS over Wi-Fi
+Samsung UA40F5500 browser
+```
+
+On the vMix PC, open PowerShell in the repository and set credentials for the
+protected gateway start/stop operations:
+
+```powershell
+$env:STREMDBC_JWT_SECRET = ((New-Guid).Guid + (New-Guid).Guid)
+$env:STREMDBC_API_KEY = ((New-Guid).Guid + (New-Guid).Guid)
+go build -o stremdbc.exe ./cmd/stremdbc
+.\scripts\windows\samsung-tv-doctor.ps1
+.\scripts\windows\samsung-tv-start.ps1
+```
+
+The doctor checks FFmpeg, vMix DirectShow devices, LAN/Wi-Fi, firewall scope,
+port 8080, credentials, and output-directory access. To add the narrowly scoped
+Private-profile TCP 8080 rule, run
+`scripts\windows\samsung-tv-firewall.ps1` from elevated PowerShell. Remove it
+with `scripts\windows\samsung-tv-firewall.ps1 -Remove`.
+
+Open the printed `http://<PC-LAN-IP>:8080/tv` URL in the television browser.
+The direct HLS fallback is
+`http://<PC-LAN-IP>:8080/tv/live/index.m3u8`; `/tv/basic` is available when the
+browser struggles with the status page. Use
+`scripts\windows\samsung-tv-test.ps1` for HTTP, MIME type, and playlist-refresh
+checks, and `scripts\windows\samsung-tv-stop.ps1` to stop the gateway. Keep the
+PC and TV on the same subnet and disable Wi-Fi client isolation. Physical
+UA40F5500 playback and long soak gates are still required before claiming TV
+compatibility.
+
+See [`docs/SAMSUNG-F5500.md`](docs/SAMSUNG-F5500.md) for the complete Windows and
+TV setup.
 
 ## Docker Compose
 
@@ -104,6 +155,11 @@ GET    /ready
 GET    /metrics
 GET    /api/v1/info
 GET    /api/v1/stats
+GET    /api/v1/tv/status
+GET    /tv/status
+POST   /api/v1/tv/start
+POST   /api/v1/tv/stop
+POST   /api/v1/tv/restart
 GET    /api/v1/streams
 POST   /api/v1/streams
 GET    /api/v1/streams/:id
@@ -111,8 +167,9 @@ DELETE /api/v1/streams/:id
 POST   /api/v1/auth/token
 ```
 
-The base path and metrics path are configurable. Mutating management requests
-and token issuance require `X-API-Key` whenever authentication is enabled.
+The base path and metrics path are configurable. Existing management mutations
+require `X-API-Key` whenever authentication is enabled. Samsung TV start, stop,
+and restart always require a configured management API key.
 Playback and WHIP/WHEP requests require stream-scoped JWTs unless anonymous
 playback was explicitly enabled.
 
@@ -125,7 +182,7 @@ adapters.
 
 | Port | Transport | Purpose |
 |---:|---|---|
-| 8080 | TCP | API, dashboard, and static delivery |
+| 8080 | TCP | API, dashboard, player, and Samsung TV HLS delivery |
 | 1935 | TCP | RTMP control adapter |
 | 8554 | TCP | RTSP control adapter |
 | 9000 | UDP | SRT metadata adapter |
@@ -150,6 +207,7 @@ adapters.
 cmd/stremdbc/            executable and lifecycle orchestration
 configs/                 runtime examples
 internal/api/            management HTTP API
+internal/gateway/samsung/ vMix External Output to legacy HLS gateway
 internal/auth/           JWT and API-key controls
 internal/cluster/        Redis coordination primitives
 internal/core/           stream registry and safe identifiers

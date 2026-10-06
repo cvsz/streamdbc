@@ -31,6 +31,11 @@ type Manager struct {
 	allowAnonymous bool
 }
 
+// APIKeyValidator checks management keys without enabling JWT operations.
+type APIKeyValidator struct {
+	apiKeys [][]byte
+}
+
 // Claims represents stream-scoped JWT claims.
 type Claims struct {
 	StreamID string `json:"stream_id"`
@@ -49,6 +54,29 @@ func NewManager(secret string, expiry string, apiKeys []string, allowAnonymous b
 		return nil, fmt.Errorf("invalid JWT expiry %q", expiry)
 	}
 
+	keys, err := parseAPIKeys(apiKeys)
+	if err != nil {
+		return nil, err
+	}
+	return &Manager{
+		jwtSecret:      []byte(secret),
+		jwtExpiry:      expiryDuration,
+		apiKeys:        keys,
+		allowAnonymous: allowAnonymous,
+	}, nil
+}
+
+// NewAPIKeyValidator creates a key-only checker for protected operations that
+// remain available when stream JWT authentication is disabled.
+func NewAPIKeyValidator(apiKeys []string) (*APIKeyValidator, error) {
+	keys, err := parseAPIKeys(apiKeys)
+	if err != nil {
+		return nil, err
+	}
+	return &APIKeyValidator{apiKeys: keys}, nil
+}
+
+func parseAPIKeys(apiKeys []string) ([][]byte, error) {
 	keys := make([][]byte, 0, len(apiKeys))
 	seenKeys := make(map[string]struct{}, len(apiKeys))
 	for _, key := range apiKeys {
@@ -69,13 +97,7 @@ func NewManager(secret string, expiry string, apiKeys []string, allowAnonymous b
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("at least one API key is required")
 	}
-
-	return &Manager{
-		jwtSecret:      []byte(secret),
-		jwtExpiry:      expiryDuration,
-		apiKeys:        keys,
-		allowAnonymous: allowAnonymous,
-	}, nil
+	return keys, nil
 }
 
 func (m *Manager) GeneratePublishToken(streamID, apiKey, ip string) (string, error) {
@@ -156,12 +178,21 @@ func (m *Manager) ValidateToken(tokenString string) (*Claims, error) {
 }
 
 func (m *Manager) ValidateAPIKey(key string) bool {
-	if m == nil || len(key) < minAPIKeyLength || strings.TrimSpace(key) != key || strings.IndexFunc(key, func(r rune) bool {
+	return m != nil && validateAPIKey(key, m.apiKeys)
+}
+
+// Validate reports whether key matches one of the configured management keys.
+func (v *APIKeyValidator) Validate(key string) bool {
+	return v != nil && validateAPIKey(key, v.apiKeys)
+}
+
+func validateAPIKey(key string, configuredKeys [][]byte) bool {
+	if len(key) < minAPIKeyLength || strings.TrimSpace(key) != key || strings.IndexFunc(key, func(r rune) bool {
 		return unicode.IsControl(r) || unicode.IsSpace(r)
 	}) >= 0 {
 		return false
 	}
-	for _, configured := range m.apiKeys {
+	for _, configured := range configuredKeys {
 		if subtle.ConstantTimeCompare(configured, []byte(key)) == 1 {
 			return true
 		}
