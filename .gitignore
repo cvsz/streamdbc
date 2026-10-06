@@ -73,3 +73,8 @@ pip-delete-this-directory.txt
 .nox/
 .pytest_cache/
 .mypy_cache/
+
+# Local licensed NDI SDK staging
+client/tv/vendor/ndi/include/*
+client/tv/vendor/ndi/jniLibs/*
+!client/tv/vendor/ndi/README.md
