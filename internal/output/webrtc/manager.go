@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/pion/webrtc/v3"
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
+	"github.com/google/uuid"
+	"github.com/pion/webrtc/v3"
 	"go.uber.org/zap"
 )
 
