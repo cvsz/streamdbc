@@ -20,6 +20,7 @@ import android.widget.Toast;
 import androidx.media3.ui.PlayerView;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public final class MainActivity extends Activity {
@@ -156,7 +157,7 @@ public final class MainActivity extends Activity {
             status.setText(R.string.ndi_discovering);
             new Thread(() -> {
                 String[] discovered = ndiReceiver.listSources();
-                List<String> sources = new ArrayList<>(List.of(discovered));
+                List<String> sources = new ArrayList<>(Arrays.asList(discovered));
                 runOnUiThread(() -> showNdiSources(sources));
             }, "ndi-discovery").start();
             return;
