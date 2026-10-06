@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/cvsz/stremdbc/internal/config"
 	pion "github.com/pion/webrtc/v3"
-	"github.com/policedbc/stremdbc/internal/config"
 	"go.uber.org/zap"
 )
 

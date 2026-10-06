@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/policedbc/stremdbc/internal/core"
+	"github.com/cvsz/stremdbc/internal/core"
 	"go.uber.org/zap"
 )
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/policedbc/stremdbc/internal/config"
+	"github.com/cvsz/stremdbc/internal/config"
 	"go.uber.org/zap"
 )
 

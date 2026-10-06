@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(streamdbc_ndi LANGUAGES CXX)
+
+add_library(streamdbc_ndi SHARED ndi_receiver.cpp)
+target_compile_features(streamdbc_ndi PRIVATE cxx_std_17)
+target_link_libraries(streamdbc_ndi PRIVATE android log)
+
+set(NDI_VENDOR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../vendor/ndi")
+set(NDI_HEADER "${NDI_VENDOR_ROOT}/include/Processing.NDI.Lib.h")
+set(NDI_LIBRARY "${NDI_VENDOR_ROOT}/jniLibs/${ANDROID_ABI}/libndi.so")
+
+if(EXISTS "${NDI_HEADER}" AND EXISTS "${NDI_LIBRARY}")
+    add_library(ndi SHARED IMPORTED)
+    set_target_properties(ndi PROPERTIES IMPORTED_LOCATION "${NDI_LIBRARY}")
+    target_include_directories(streamdbc_ndi PRIVATE "${NDI_VENDOR_ROOT}/include")
+    target_compile_definitions(streamdbc_ndi PRIVATE STREAMDBC_NDI_SDK=1)
+    target_link_libraries(streamdbc_ndi PRIVATE ndi)
+else()
+    message(STATUS "NDI SDK not present: building fail-closed receiver stub")
+endif()

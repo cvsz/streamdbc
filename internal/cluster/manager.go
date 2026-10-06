@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/policedbc/stremdbc/internal/config"
+	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/policedbc/stremdbc/internal/auth"
-	"github.com/policedbc/stremdbc/internal/config"
-	"github.com/policedbc/stremdbc/internal/core"
-	"github.com/policedbc/stremdbc/internal/metrics"
+	"github.com/cvsz/stremdbc/internal/auth"
+	"github.com/cvsz/stremdbc/internal/config"
+	"github.com/cvsz/stremdbc/internal/core"
+	"github.com/cvsz/stremdbc/internal/metrics"
 	"go.uber.org/zap"
 )
 

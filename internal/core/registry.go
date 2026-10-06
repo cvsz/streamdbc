@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/policedbc/stremdbc/internal/config"
+	"github.com/cvsz/stremdbc/internal/config"
 )
 
 // StreamState represents the state of a stream
