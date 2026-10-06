@@ -13,7 +13,7 @@ on:
       - ".github/workflows/desktop.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: desktop-${{ github.workflow }}-${{ github.ref }}
@@ -35,8 +35,21 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
+
+      - name: Generate dependency lock
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Commit dependency lock
+        shell: bash
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "build(client): lock npm dependency graph"
+          git push origin HEAD:hardening/production-grade-2026-10-06
 
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
