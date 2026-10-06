@@ -154,7 +154,7 @@ func TestStaticPlaybackRequiresPlayTokenWhenAuthenticationIsRequired(t *testing.
 		t.Fatalf("expected unauthorized playback, got %d", res.Code)
 	}
 
-	token, err := manager.GeneratePlayToken("demo", clientIP(req))
+	token, err := manager.GeneratePlayToken("demo", server.clientIP(req))
 	if err != nil {
 		t.Fatalf("generate play token: %v", err)
 	}
@@ -220,5 +220,38 @@ func TestMetricsConfigurationRejectsStaticRouteShadowing(t *testing.T) {
 	server.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
 	if res.Code != http.StatusTemporaryRedirect {
 		t.Fatalf("static dashboard route was shadowed by metrics, got %d: %s", res.Code, res.Body.String())
+	}
+}
+
+func TestTrustedProxyClientIP(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.API.TrustedProxies = []string{"192.0.2.1"}
+	server := NewServer(&cfg.API, core.NewStreamRegistry(cfg), metrics.NewMetrics(), zap.NewNop())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+	req.RemoteAddr = "192.0.2.1:12345"
+	req.Header.Set("X-Forwarded-For", "198.51.100.7, 192.0.2.1")
+	if got := server.clientIP(req); got != "198.51.100.7" {
+		t.Fatalf("trusted proxy client IP = %q", got)
+	}
+
+	cfg = config.DefaultConfig()
+	server = NewServer(&cfg.API, core.NewStreamRegistry(cfg), metrics.NewMetrics(), zap.NewNop())
+	if got := server.clientIP(req); got != "192.0.2.1" {
+		t.Fatalf("untrusted proxy header was accepted: %q", got)
+	}
+}
+
+func TestManagementRateLimit(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.API.RateLimitPerMinute = 1
+	server := NewServer(&cfg.API, core.NewStreamRegistry(cfg), metrics.NewMetrics(), zap.NewNop())
+	for i, want := range []int{http.StatusOK, http.StatusTooManyRequests} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+		req.RemoteAddr = "198.51.100.20:12345"
+		res := httptest.NewRecorder()
+		server.Handler().ServeHTTP(res, req)
+		if res.Code != want {
+			t.Fatalf("request %d returned %d, want %d", i+1, res.Code, want)
+		}
 	}
 }
