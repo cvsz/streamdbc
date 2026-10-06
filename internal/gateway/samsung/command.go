@@ -31,9 +31,9 @@ func BuildArgs(cfg config.SamsungTVConfig) ([]string, error) {
 	args := []string{"-hide_banner", "-loglevel", "warning"}
 	if cfg.Source == "vmix_external" {
 		args = append(args,
+			"-rtbufsize", "64M",
 			"-f", "dshow",
 			"-video_size", fmt.Sprintf("%dx%d", cfg.Width, cfg.Height),
-			"-framerate", strconv.Itoa(cfg.FrameRate),
 			"-i", fmt.Sprintf(`video="%s":audio="%s"`, cfg.VideoDevice, cfg.AudioDevice),
 			"-map", "0:v:0", "-map", "0:a:0",
 		)

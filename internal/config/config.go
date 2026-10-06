@@ -7,8 +7,9 @@ import (
 	"net"
 	"net/url"
 	"os"
-	pathpkg "path"
+	"path"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -424,7 +425,6 @@ func Load(path string) (*Config, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		return cfg, nil
 	}
-	data = []byte(os.ExpandEnv(string(data)))
 
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
@@ -438,7 +438,59 @@ func Load(path string) (*Config, error) {
 		}
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
+	if err := expandConfigEnv(cfg); err != nil {
+		return nil, fmt.Errorf("expanding environment variables: %w", err)
+	}
 	return cfg, nil
+}
+
+// expandConfigEnv recursively walks the config struct and expands
+// environment variables in all string fields. This runs after YAML
+// parsing so Windows paths like C:\Users\... don't break the YAML
+// parser (which would see \U as an invalid escape).
+func expandConfigEnv(v interface{}) error {
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Ptr {
+		rv = rv.Elem()
+	}
+	return expandEnvValue(rv)
+}
+
+func expandEnvValue(rv reflect.Value) error {
+	if !rv.IsValid() {
+		return nil
+	}
+	switch rv.Kind() {
+	case reflect.String:
+		if rv.CanSet() {
+			rv.SetString(os.ExpandEnv(rv.String()))
+		}
+	case reflect.Struct:
+		for i := 0; i < rv.NumField(); i++ {
+			if err := expandEnvValue(rv.Field(i)); err != nil {
+				return err
+			}
+		}
+	case reflect.Ptr, reflect.Interface:
+		if !rv.IsNil() {
+			if err := expandEnvValue(rv.Elem()); err != nil {
+				return err
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < rv.Len(); i++ {
+			if err := expandEnvValue(rv.Index(i)); err != nil {
+				return err
+			}
+		}
+	case reflect.Map:
+		for _, key := range rv.MapKeys() {
+			if err := expandEnvValue(rv.MapIndex(key)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Validate validates configuration invariants before listeners are started.
@@ -923,9 +975,9 @@ func validateSamsungOutputPath(value string) error {
 		return fmt.Errorf("samsung_tv.output_path must be an absolute directory path")
 	}
 	portablePath := strings.ReplaceAll(value, `\`, "/")
-	normalized := pathpkg.Clean(portablePath)
+	normalized := path.Clean(portablePath)
 	if uncAbsolute {
-		uncPath := pathpkg.Clean("/" + strings.TrimLeft(portablePath, "/"))
+		uncPath := path.Clean("/" + strings.TrimLeft(portablePath, "/"))
 		if len(strings.Split(strings.Trim(uncPath, "/"), "/")) <= 2 {
 			return fmt.Errorf("samsung_tv.output_path cannot be a network share root")
 		}
@@ -938,7 +990,7 @@ func validateSamsungOutputPath(value string) error {
 
 func pathsOverlap(left, right string) bool {
 	normalize := func(value string) string {
-		return strings.ToLower(pathpkg.Clean(strings.ReplaceAll(value, `\`, "/")))
+		return strings.ToLower(path.Clean(strings.ReplaceAll(value, `\`, "/")))
 	}
 	left, right = normalize(left), normalize(right)
 	return left == right || strings.HasPrefix(left, strings.TrimRight(right, "/")+"/") || strings.HasPrefix(right, strings.TrimRight(left, "/")+"/")

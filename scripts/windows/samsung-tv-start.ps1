@@ -6,7 +6,11 @@ param(
     [switch]$SkipDoctor
 )
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+. (Join-Path $PSScriptRoot "samsung-tv-common.ps1")
+
+# ProviderPath yields a normalised filesystem path; .Path keeps the literal
+# ".." segments and the PowerShell provider prefix, which breaks GetFullPath.
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).ProviderPath
 if (-not [System.IO.Path]::IsPathRooted($ConfigPath)) { $ConfigPath = Join-Path $repoRoot $ConfigPath }
 if (-not [System.IO.Path]::IsPathRooted($Executable)) { $Executable = Join-Path $repoRoot $Executable }
 $ConfigPath = [System.IO.Path]::GetFullPath($ConfigPath)
@@ -61,11 +65,8 @@ if (-not $ready) {
     throw "Samsung TV HLS did not become ready. Status: $statusText. Check vMix and FFmpeg DirectShow devices."
 }
 
-$lan = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-    Where-Object { $_.IPAddress -notlike "169.254.*" -and $_.IPAddress -ne "127.0.0.1" -and $_.AddressState -eq "Preferred" } |
-    Sort-Object @{ Expression = { if ($_.InterfaceAlias -match "Wi-Fi|Wireless|WLAN") { 0 } else { 1 } } } |
-    Select-Object -First 1
-if ($null -eq $lan) { throw "No active LAN IPv4 address found." }
+$lan = Get-SamsungTVLanAddress
+if ($null -eq $lan) { throw "No active LAN IPv4 address found. Connect the PC to the same network as the Samsung TV." }
 
 Write-Host "Samsung TV gateway is live on profile $($status.profile)." -ForegroundColor Green
 Write-Host "Open this on Samsung TV:"
