@@ -1,0 +1,70 @@
+name: Samsung TV Gateway
+
+on:
+  push:
+    branches: [main, feat/samsung-f5500-wifi-hls]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: samsung-tv-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  samsung-gateway:
+    name: Go and synthetic HLS compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg
+          ffmpeg -version
+          ffprobe -version
+
+      - name: Verify FFmpeg Samsung encoders
+        run: |
+          ffmpeg -hide_banner -h encoder=libx264
+          ffmpeg -hide_banner -h encoder=aac
+
+      - name: Verify modules and formatting
+        run: |
+          go mod verify
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "gofmt required for:"
+            echo "$files"
+            exit 1
+          fi
+          go mod tidy -diff
+
+      - name: Go unit, race, API, and FFmpeg integration tests
+        run: go test -race -coverprofile=coverage.out ./...
+
+      - name: Govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+
+      - name: Gosec
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 ./...
+
+      - name: Vet and build
+        run: |
+          go vet ./...
+          go build -trimpath -o /tmp/stremdbc-samsung ./cmd/stremdbc

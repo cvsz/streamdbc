@@ -403,6 +403,9 @@ func (w *Worker) executeJob(ctx context.Context, job *TranscodeJob) {
 		w.mu.Unlock()
 		err := cmd.Run()
 		w.recordProgress(job, progress.String())
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
 		if err == nil {
 			if outputErr := validateTranscodedOutput(transcodedOutputPath(job, profile)); outputErr != nil {
 				err = outputErr

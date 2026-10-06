@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -49,6 +50,7 @@ type Config struct {
 	Logging    LoggingConfig    `yaml:"logging"`
 	Metrics    MetricsConfig    `yaml:"metrics"`
 	Recorder   RecorderConfig   `yaml:"recorder"`
+	SamsungTV  SamsungTVConfig  `yaml:"samsung_tv"`
 	Auth       AuthConfig       `yaml:"auth"`
 	Redis      RedisConfig      `yaml:"redis"`
 	Postgres   PostgresConfig   `yaml:"postgres"`
@@ -103,6 +105,30 @@ type RecorderConfig struct {
 	Enable     bool   `yaml:"enable"`
 	Path       string `yaml:"path"`
 	FFmpegPath string `yaml:"ffmpeg_path"`
+}
+
+// SamsungTVConfig describes the legacy-compatible HLS gateway used by older
+// Samsung televisions. FFmpeg is always invoked with an argument slice; device
+// values are DirectShow device labels and never shell fragments.
+type SamsungTVConfig struct {
+	Enable          bool          `yaml:"enable"`
+	FFmpegPath      string        `yaml:"ffmpeg_path"`
+	Source          string        `yaml:"source"`
+	VideoDevice     string        `yaml:"video_device"`
+	AudioDevice     string        `yaml:"audio_device"`
+	OutputPath      string        `yaml:"output_path"`
+	Profile         string        `yaml:"profile"`
+	Width           int           `yaml:"width"`
+	Height          int           `yaml:"height"`
+	FrameRate       int           `yaml:"frame_rate"`
+	VideoBitrate    int           `yaml:"video_bitrate"`
+	MaxVideoBitrate int           `yaml:"max_video_bitrate"`
+	VideoBuffer     int           `yaml:"video_buffer"`
+	AudioBitrate    int           `yaml:"audio_bitrate"`
+	AudioSampleRate int           `yaml:"audio_sample_rate"`
+	SegmentDuration time.Duration `yaml:"segment_duration"`
+	PlaylistSize    int           `yaml:"playlist_size"`
+	AutoRestart     bool          `yaml:"auto_restart"`
 }
 
 type RTSPConfig struct {
@@ -315,6 +341,26 @@ func DefaultConfig() *Config {
 			Enable:     false,
 			Path:       "/tmp/recordings",
 			FFmpegPath: "ffmpeg",
+		},
+		SamsungTV: SamsungTVConfig{
+			Enable:          false,
+			FFmpegPath:      "ffmpeg",
+			Source:          "vmix_external",
+			VideoDevice:     "vMix Video",
+			AudioDevice:     "vMix Audio",
+			OutputPath:      filepath.Join(os.TempDir(), "samsung-tv"),
+			Profile:         "f5500_720p",
+			Width:           1280,
+			Height:          720,
+			FrameRate:       30,
+			VideoBitrate:    3_500_000,
+			MaxVideoBitrate: 4_000_000,
+			VideoBuffer:     7_000_000,
+			AudioBitrate:    128_000,
+			AudioSampleRate: 48_000,
+			SegmentDuration: 2 * time.Second,
+			PlaylistSize:    6,
+			AutoRestart:     true,
 		},
 		Auth: AuthConfig{
 			Enable:         false,
@@ -624,6 +670,63 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("HLS playlist_size must not exceed %d", MaxPlaylistSize)
 		}
 	}
+	if c.SamsungTV.Enable {
+		if !c.API.Enable {
+			return fmt.Errorf("samsung_tv.enable requires api.enable=true")
+		}
+		if c.Auth.Enable && !c.Auth.AllowAnonymous {
+			return fmt.Errorf("samsung_tv playback requires auth.allow_anonymous=true because the TV browser cannot provide a playback token")
+		}
+		if c.SamsungTV.Source != "vmix_external" && c.SamsungTV.Source != "test" {
+			return fmt.Errorf("samsung_tv.source must be vmix_external or test")
+		}
+		if strings.TrimSpace(c.SamsungTV.FFmpegPath) == "" || strings.TrimSpace(c.SamsungTV.FFmpegPath) != c.SamsungTV.FFmpegPath || len(c.SamsungTV.FFmpegPath) > 4096 || strings.HasPrefix(c.SamsungTV.FFmpegPath, "-") || strings.IndexFunc(c.SamsungTV.FFmpegPath, unicode.IsControl) >= 0 {
+			return fmt.Errorf("samsung_tv.ffmpeg_path is invalid")
+		}
+		if c.SamsungTV.Source == "vmix_external" {
+			for name, device := range map[string]string{"video_device": c.SamsungTV.VideoDevice, "audio_device": c.SamsungTV.AudioDevice} {
+				if device == "" || strings.TrimSpace(device) != device || len(device) > 256 || strings.IndexFunc(device, unicode.IsControl) >= 0 || strings.ContainsAny(device, "\":") {
+					return fmt.Errorf("samsung_tv.%s must be a DirectShow device label without quotes, colons, or control characters", name)
+				}
+			}
+		}
+		if err := validateSamsungOutputPath(c.SamsungTV.OutputPath); err != nil {
+			return err
+		}
+		var expectedWidth, expectedHeight int
+		switch c.SamsungTV.Profile {
+		case "f5500_720p":
+			expectedWidth, expectedHeight = 1280, 720
+		case "f5500_1080p":
+			expectedWidth, expectedHeight = 1920, 1080
+		default:
+			return fmt.Errorf("unsupported samsung_tv.profile %q", c.SamsungTV.Profile)
+		}
+		if c.SamsungTV.Width != expectedWidth || c.SamsungTV.Height != expectedHeight {
+			return fmt.Errorf("samsung_tv.profile %s requires %dx%d dimensions", c.SamsungTV.Profile, expectedWidth, expectedHeight)
+		}
+		if c.SamsungTV.FrameRate < 24 || c.SamsungTV.FrameRate > 30 {
+			return fmt.Errorf("samsung_tv.frame_rate must be between 24 and 30")
+		}
+		if c.SamsungTV.VideoBitrate < 1_000_000 || c.SamsungTV.VideoBitrate > 8_000_000 || c.SamsungTV.MaxVideoBitrate < c.SamsungTV.VideoBitrate || c.SamsungTV.MaxVideoBitrate > 10_000_000 || c.SamsungTV.VideoBuffer < c.SamsungTV.MaxVideoBitrate || c.SamsungTV.VideoBuffer > 30_000_000 {
+			return fmt.Errorf("samsung_tv video bitrate and buffer values are outside safe limits")
+		}
+		if c.SamsungTV.AudioBitrate < 64_000 || c.SamsungTV.AudioBitrate > 192_000 || c.SamsungTV.AudioSampleRate != 48_000 {
+			return fmt.Errorf("samsung_tv audio must use 64-192 kbps AAC-LC at 48000 Hz")
+		}
+		if c.SamsungTV.SegmentDuration < time.Second || c.SamsungTV.SegmentDuration > 10*time.Second || c.SamsungTV.SegmentDuration%time.Second != 0 {
+			return fmt.Errorf("samsung_tv.segment_duration must be a whole number from 1s through 10s")
+		}
+		if c.SamsungTV.PlaylistSize < 3 || c.SamsungTV.PlaylistSize > 20 {
+			return fmt.Errorf("samsung_tv.playlist_size must be between 3 and 20")
+		}
+		if c.HLS.Enable && pathsOverlap(c.SamsungTV.OutputPath, c.HLS.Path) {
+			return fmt.Errorf("samsung_tv.output_path must be isolated from hls.path")
+		}
+		if c.LLHLS.Enable && pathsOverlap(c.SamsungTV.OutputPath, c.LLHLS.Path) {
+			return fmt.Errorf("samsung_tv.output_path must be isolated from llhls.path")
+		}
+	}
 	if c.LLHLS.Enable {
 		if err := validateDataPath("LL-HLS", c.LLHLS.Path); err != nil {
 			return err
@@ -810,6 +913,33 @@ func validateDataPath(name, path string) error {
 	return nil
 }
 
+func validateSamsungOutputPath(value string) error {
+	if strings.TrimSpace(value) != value || value == "" || len(value) > 4096 || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return fmt.Errorf("samsung_tv.output_path is invalid")
+	}
+	windowsAbsolute := len(value) >= 3 && ((value[0] >= 'a' && value[0] <= 'z') || (value[0] >= 'A' && value[0] <= 'Z')) && value[1] == ':' && (value[2] == '/' || value[2] == '\\')
+	uncAbsolute := strings.HasPrefix(value, `\\`) || strings.HasPrefix(value, "//")
+	if !filepath.IsAbs(value) && !windowsAbsolute && !uncAbsolute {
+		return fmt.Errorf("samsung_tv.output_path must be an absolute directory path")
+	}
+	normalized := pathpkg.Clean(strings.ReplaceAll(value, `\`, "/"))
+	if normalized == "." || normalized == "/" || (len(normalized) == 2 && normalized[1] == ':') {
+		return fmt.Errorf("samsung_tv.output_path cannot be a filesystem root")
+	}
+	if strings.HasPrefix(normalized, "//") && len(strings.Split(strings.TrimPrefix(normalized, "//"), "/")) <= 2 {
+		return fmt.Errorf("samsung_tv.output_path cannot be a network share root")
+	}
+	return nil
+}
+
+func pathsOverlap(left, right string) bool {
+	normalize := func(value string) string {
+		return strings.ToLower(pathpkg.Clean(strings.ReplaceAll(value, `\`, "/")))
+	}
+	left, right = normalize(left), normalize(right)
+	return left == right || strings.HasPrefix(left, strings.TrimRight(right, "/")+"/") || strings.HasPrefix(right, strings.TrimRight(left, "/")+"/")
+}
+
 func validateBasePath(value string) error {
 	if strings.TrimSpace(value) != value || value == "" || value == "/" {
 		return fmt.Errorf("API base path must be a non-root path")
@@ -831,7 +961,7 @@ func validateRoutePath(name, value string) error {
 }
 
 func conflictsWithStaticPath(path string) bool {
-	for _, prefix := range []string{"/dashboard", "/player", "/hls", "/llhls"} {
+	for _, prefix := range []string{"/dashboard", "/player", "/hls", "/llhls", "/tv"} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}

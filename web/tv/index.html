@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache">
+  <title>StreamDBC Samsung TV</title>
+  <style type="text/css">
+    html, body { width: 100%; height: 100%; margin: 0; background: #000; color: #fff; font-family: Arial, sans-serif; }
+    body { overflow: hidden; }
+    #player { display: block; width: 100%; height: 100%; background: #000; }
+    #panel { position: absolute; left: 2%; top: 2%; max-width: 90%; padding: 12px 16px; background: #111; background: rgba(0,0,0,0.78); }
+    #status { margin: 0 0 8px 0; font-size: 28px; font-weight: bold; }
+    #details { margin: 0 0 10px 0; font-size: 16px; }
+    button, a { display: inline-block; margin: 4px 8px 4px 0; padding: 10px 18px; border: 0; background: #1675d1; color: #fff; font-size: 20px; text-decoration: none; cursor: pointer; }
+    #hint { font-size: 14px; color: #ccc; }
+  </style>
+</head>
+<body>
+  <video id="player" controls autoplay preload="auto">
+    <source src="/tv/live/index.m3u8" type="application/vnd.apple.mpegurl">
+    Video playback is unavailable. Open the direct HLS link on this television.
+  </video>
+  <div id="panel">
+    <p id="status">Connecting to live video...</p>
+    <p id="details">Profile: checking | Gateway: checking</p>
+    <button id="play" type="button">PLAY</button>
+    <button id="reload" type="button">RELOAD STREAM</button>
+    <button id="fullscreen" type="button">FULLSCREEN</button>
+    <a href="/tv/live/index.m3u8">DIRECT HLS</a>
+    <p id="hint">If this page stays offline, open /tv/basic or the direct HLS link.</p>
+  </div>
+  <script type="text/javascript">
+    (function () {
+      var player = document.getElementById('player');
+      var status = document.getElementById('status');
+      var details = document.getElementById('details');
+      var retryTimer = null;
+      var retryCount = 0;
+
+      function setStatus(message) {
+        status.innerHTML = message;
+      }
+
+      function tryPlayback() {
+        setStatus('Starting live video...');
+        try {
+          player.load();
+          player.play();
+        } catch (error) {
+          setStatus('Press PLAY to start video.');
+        }
+      }
+
+      function scheduleRetry() {
+        if (retryTimer !== null) {
+          window.clearTimeout(retryTimer);
+        }
+        if (retryCount < 8) {
+          retryCount = retryCount + 1;
+          setStatus('Stream offline. Retrying...');
+          retryTimer = window.setTimeout(tryPlayback, 5000);
+        } else {
+          setStatus('Stream offline. Press PLAY or RELOAD STREAM.');
+        }
+      }
+
+      function loadStatus() {
+        var request = new XMLHttpRequest();
+        request.onreadystatechange = function () {
+          if (request.readyState === 4) {
+            if (request.status === 200) {
+              try {
+                var result = JSON.parse(request.responseText);
+                details.innerHTML = 'Profile: ' + result.profile + ' | Gateway: ' + result.state;
+                if (result.state === 'live' && result.playlist_ready) {
+                  setStatus('Live video ready');
+                } else if (result.state === 'restarting' || result.state === 'starting') {
+                  setStatus('Connecting to live video...');
+                } else {
+                  setStatus('Stream offline. Press PLAY to retry.');
+                }
+              } catch (error) {
+                details.innerHTML = 'Profile: unknown | Gateway: status unavailable';
+              }
+            } else {
+              details.innerHTML = 'Profile: unknown | Gateway: status unavailable';
+            }
+          }
+        };
+        request.open('GET', '/api/v1/tv/status', true);
+        request.send(null);
+      }
+
+      document.getElementById('play').onclick = function () {
+        retryCount = 0;
+        tryPlayback();
+      };
+      document.getElementById('reload').onclick = function () {
+        retryCount = 0;
+        tryPlayback();
+        loadStatus();
+      };
+      document.getElementById('fullscreen').onclick = function () {
+        try {
+          if (player.requestFullscreen) {
+            player.requestFullscreen();
+          } else if (player.webkitRequestFullscreen) {
+            player.webkitRequestFullscreen();
+          } else if (player.webkitEnterFullscreen) {
+            player.webkitEnterFullscreen();
+          } else {
+            setStatus('Use the TV browser fullscreen controls.');
+          }
+        } catch (error) {
+          setStatus('Use the TV browser fullscreen controls.');
+        }
+      };
+      player.addEventListener('playing', function () {
+        retryCount = 0;
+        setStatus('LIVE');
+      }, false);
+      player.addEventListener('error', scheduleRetry, false);
+      player.addEventListener('stalled', scheduleRetry, false);
+      loadStatus();
+      window.setInterval(loadStatus, 10000);
+    }());
+  </script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+server:
+  host: "0.0.0.0"
+  http_port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 120s
+  stream_ttl: 24h
+
+api:
+  enable: true
+  base_path: "/api/v1"
+  cors_origins: []
+  trusted_proxies: []
+  rate_limit_per_minute: 120
+
+logging:
+  level: "info"
+  format: "console"
+  output_path: "stdout"
+
+metrics:
+  enable: false
+  path: "/metrics"
+
+auth:
+  enable: true
+  jwt_secret: "${STREMDBC_JWT_SECRET}"
+  jwt_expiry: "24h"
+  api_keys:
+    - "${STREMDBC_API_KEY}"
+  allow_anonymous: true
+
+samsung_tv:
+  enable: true
+  ffmpeg_path: "ffmpeg"
+  source: "vmix_external"
+  video_device: "vMix Video"
+  audio_device: "vMix Audio"
+  output_path: "${LOCALAPPDATA}/StreamDBC/SamsungTV"
+  profile: "f5500_720p"
+  width: 1280
+  height: 720
+  frame_rate: 30
+  video_bitrate: 3500000
+  max_video_bitrate: 4000000
+  video_buffer: 7000000
+  audio_bitrate: 128000
+  audio_sample_rate: 48000
+  segment_duration: 2s
+  playlist_size: 6
+  auto_restart: true

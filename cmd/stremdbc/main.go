@@ -19,6 +19,7 @@ import (
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
 	"github.com/cvsz/stremdbc/internal/dvr"
+	samsunggateway "github.com/cvsz/stremdbc/internal/gateway/samsung"
 	rtmpingest "github.com/cvsz/stremdbc/internal/ingest/rtmp"
 	rtspingest "github.com/cvsz/stremdbc/internal/ingest/rtsp"
 	srtingest "github.com/cvsz/stremdbc/internal/ingest/srt"
@@ -86,6 +87,7 @@ func run() (runErr error) {
 		rtspOutputServer *rtspoutput.Server
 		srtOutputServer  *srtoutput.Server
 		clusterManager   *cluster.Manager
+		samsungManager   *samsunggateway.Manager
 		apiServer        *api.Server
 	)
 	shutdownCalled := false
@@ -95,7 +97,7 @@ func run() (runErr error) {
 			return shutdownErr
 		}
 		shutdownCalled = true
-		shutdownErr = newShutdown(logger, cancel, apiServer, rtmpServer, rtspServer, srtServer, webrtcServer, rtmpOutputServer, rtspOutputServer, srtOutputServer, llhlsManager, dvrManager, recManager, transManager, clusterManager)(shutdownCtx)
+		shutdownErr = newShutdown(logger, cancel, apiServer, samsungManager, rtmpServer, rtspServer, srtServer, webrtcServer, rtmpOutputServer, rtspOutputServer, srtOutputServer, llhlsManager, dvrManager, recManager, transManager, clusterManager)(shutdownCtx)
 		return shutdownErr
 	}
 	defer func() {
@@ -158,6 +160,16 @@ func run() (runErr error) {
 			return fmt.Errorf("start transcoder: %w", err)
 		}
 		logger.Info("transcoder manager initialized; job submission is external", zap.Int("workers", cfg.Transcoder.WorkerCount))
+	}
+
+	samsungManager, err = samsunggateway.NewManager(&cfg.SamsungTV, logger)
+	if err != nil {
+		return fmt.Errorf("create Samsung TV gateway: %w", err)
+	}
+	if cfg.SamsungTV.Enable {
+		if err := samsungManager.Start(); err != nil {
+			return fmt.Errorf("start Samsung TV gateway: %w", err)
+		}
 	}
 
 	if cfg.RTMP.Enable {
@@ -239,7 +251,8 @@ func run() (runErr error) {
 		llhlsPath = llhlsManager.GetOutputPath()
 	}
 	apiServer.SetStaticRoutes(hlsPath, llhlsPath, resolveAssetPath(filepath.Join("web", "player", "index.html")), resolveAssetPath(filepath.Join("web", "dashboard")))
-	registerComponentStats(apiServer, hlsManager, llhlsManager, recManager, dvrManager, transManager, clusterManager)
+	apiServer.SetSamsungTV(samsungManager, cfg.SamsungTV, resolveAssetPath(filepath.Join("web", "tv")))
+	registerComponentStats(apiServer, hlsManager, llhlsManager, recManager, dvrManager, transManager, clusterManager, samsungManager)
 
 	registry.Cleanup(ctx, 5*time.Minute)
 	if hlsManager != nil {
@@ -280,7 +293,7 @@ func run() (runErr error) {
 	return shutdown(shutdownCtx)
 }
 
-func registerComponentStats(server *api.Server, hlsManager *hls.OutputManager, llhlsManager *llhls.Manager, recManager *recorder.Manager, dvrManager *dvr.Manager, transManager *transcoder.Manager, clusterManager *cluster.Manager) {
+func registerComponentStats(server *api.Server, hlsManager *hls.OutputManager, llhlsManager *llhls.Manager, recManager *recorder.Manager, dvrManager *dvr.Manager, transManager *transcoder.Manager, clusterManager *cluster.Manager, samsungManager *samsunggateway.Manager) {
 	if hlsManager != nil {
 		server.RegisterStats("hls", hlsManager.GetStats)
 	}
@@ -301,9 +314,18 @@ func registerComponentStats(server *api.Server, hlsManager *hls.OutputManager, l
 			return map[string]interface{}{"nodes": clusterManager.GetNodes(), "active_nodes": len(clusterManager.GetActiveNodes())}
 		})
 	}
+	if samsungManager != nil {
+		server.RegisterStats("samsung_tv", func() map[string]interface{} {
+			status := samsungManager.Status()
+			return map[string]interface{}{
+				"enabled": status.Enabled, "state": status.State, "profile": status.Profile,
+				"restart_count": status.RestartCount, "playlist_ready": status.PlaylistReady,
+			}
+		})
+	}
 }
 
-func newShutdown(logger *zap.Logger, cancel context.CancelFunc, apiServer *api.Server, rtmpServer *rtmpingest.Server, rtspServer *rtspingest.Server, srtServer *srtingest.Server, webrtcServer *webrtcingest.Server, rtmpOutputServer *rtmpoutput.Server, rtspOutputServer *rtspoutput.Server, srtOutputServer *srtoutput.Server, llhlsManager *llhls.Manager, dvrManager *dvr.Manager, recManager *recorder.Manager, transManager *transcoder.Manager, clusterManager *cluster.Manager) func(context.Context) error {
+func newShutdown(logger *zap.Logger, cancel context.CancelFunc, apiServer *api.Server, samsungManager *samsunggateway.Manager, rtmpServer *rtmpingest.Server, rtspServer *rtspingest.Server, srtServer *srtingest.Server, webrtcServer *webrtcingest.Server, rtmpOutputServer *rtmpoutput.Server, rtspOutputServer *rtspoutput.Server, srtOutputServer *srtoutput.Server, llhlsManager *llhls.Manager, dvrManager *dvr.Manager, recManager *recorder.Manager, transManager *transcoder.Manager, clusterManager *cluster.Manager) func(context.Context) error {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -337,6 +359,12 @@ func newShutdown(logger *zap.Logger, cancel context.CancelFunc, apiServer *api.S
 				return nil
 			}
 			return apiServer.Stop(ctx)
+		})
+		stop("Samsung TV gateway", func() error {
+			if samsungManager == nil {
+				return nil
+			}
+			return samsungManager.Stop(ctx)
 		})
 		stop("RTMP", func() error {
 			if rtmpServer == nil {

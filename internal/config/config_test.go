@@ -192,7 +192,7 @@ func TestConfigRejectsInvalidHTTPConfigurationValues(t *testing.T) {
 			t.Fatalf("expected metrics health-route conflict for %q, got %v", path, err)
 		}
 	}
-	for _, path := range []string{"/dashboard", "/dashboard/status", "/player/demo", "/hls/demo", "/llhls/demo"} {
+	for _, path := range []string{"/dashboard", "/dashboard/status", "/player/demo", "/hls/demo", "/llhls/demo", "/tv", "/tv/live"} {
 		cfg = DefaultConfig()
 		cfg.Metrics.Path = path
 		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "conflicts") {
@@ -236,6 +236,85 @@ func TestConfigRejectsUnboundedTranscoderResources(t *testing.T) {
 			test.change(cfg)
 			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("expected bounded transcoder validation error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestSamsungTVConfigProfilesAndValidation(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.SamsungTV.Enable = true
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("default Samsung F5500 profile should validate: %v", err)
+	}
+
+	cfg = DefaultConfig()
+	cfg.SamsungTV.Enable = true
+	cfg.SamsungTV.Profile = "f5500_1080p"
+	cfg.SamsungTV.Width = 1920
+	cfg.SamsungTV.Height = 1080
+	cfg.SamsungTV.VideoBitrate = 6_000_000
+	cfg.SamsungTV.MaxVideoBitrate = 7_000_000
+	cfg.SamsungTV.VideoBuffer = 12_000_000
+	cfg.SamsungTV.AudioBitrate = 160_000
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("optional 1080p profile should validate: %v", err)
+	}
+}
+
+func TestSamsungF5500ExampleConfigLoads(t *testing.T) {
+	localAppData := filepath.Join(t.TempDir(), "LocalAppData")
+	t.Setenv("LOCALAPPDATA", localAppData)
+	t.Setenv("STREMDBC_JWT_SECRET", strings.Repeat("j", 40))
+	t.Setenv("STREMDBC_API_KEY", "sample-api-key-with-sufficient-length")
+
+	cfg, err := Load(filepath.Join("..", "..", "configs", "samsung-f5500.yaml"))
+	if err != nil {
+		t.Fatalf("load Samsung F5500 sample config: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Samsung F5500 sample config should validate: %v", err)
+	}
+	if !cfg.API.Enable || !cfg.Auth.Enable || !cfg.Auth.AllowAnonymous || !cfg.SamsungTV.Enable {
+		t.Fatalf("sample should enable only API, anonymous TV playback, and the Samsung gateway: api=%t auth=%t anonymous=%t samsung=%t", cfg.API.Enable, cfg.Auth.Enable, cfg.Auth.AllowAnonymous, cfg.SamsungTV.Enable)
+	}
+	if cfg.SamsungTV.OutputPath != filepath.Join(localAppData, "StreamDBC", "SamsungTV") {
+		t.Fatalf("sample output path did not expand LOCALAPPDATA: %q", cfg.SamsungTV.OutputPath)
+	}
+	for name, enabled := range map[string]bool{
+		"hls": cfg.HLS.Enable, "llhls": cfg.LLHLS.Enable, "rtmp": cfg.RTMP.Enable,
+		"rtsp": cfg.RTSP.Enable, "srt": cfg.SRT.Enable, "webrtc": cfg.WebRTC.Enable,
+		"recorder": cfg.Recorder.Enable, "dvr": cfg.DVR.Enable, "transcoder": cfg.Transcoder.Enable,
+		"cluster": cfg.Cluster.Enable, "redis": cfg.Redis.Enable, "postgres": cfg.Postgres.Enable,
+	} {
+		if enabled {
+			t.Errorf("sample config should not enable unrelated service %s", name)
+		}
+	}
+}
+
+func TestSamsungTVConfigRejectsUnsafeOrIncompatibleValues(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{name: "resolution", mutate: func(cfg *Config) { cfg.SamsungTV.Width = 1920 }, want: "requires 1280x720"},
+		{name: "video bitrate", mutate: func(cfg *Config) { cfg.SamsungTV.VideoBitrate = 9_000_000 }, want: "bitrate"},
+		{name: "playlist size", mutate: func(cfg *Config) { cfg.SamsungTV.PlaylistSize = 2 }, want: "playlist_size"},
+		{name: "segment duration", mutate: func(cfg *Config) { cfg.SamsungTV.SegmentDuration = 1500 * time.Millisecond }, want: "segment_duration"},
+		{name: "relative output path", mutate: func(cfg *Config) { cfg.SamsungTV.OutputPath = "./hls" }, want: "absolute"},
+		{name: "empty video device", mutate: func(cfg *Config) { cfg.SamsungTV.VideoDevice = "" }, want: "video_device"},
+		{name: "quoted device", mutate: func(cfg *Config) { cfg.SamsungTV.AudioDevice = `vMix Audio\":audio=other` }, want: "audio_device"},
+		{name: "invalid ffmpeg executable", mutate: func(cfg *Config) { cfg.SamsungTV.FFmpegPath = "-version" }, want: "ffmpeg_path"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.SamsungTV.Enable = true
+			test.mutate(cfg)
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q validation error, got %v", test.want, err)
 			}
 		})
 	}

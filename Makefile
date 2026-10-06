@@ -1,4 +1,4 @@
-.PHONY: all build run test test-race test-coverage tidy deps clean docker-build docker-run docker-stop docker-compose-up docker-compose-down docker-compose-monitoring fmt fmt-check lint vet verify help
+.PHONY: all build run test test-race test-coverage tidy deps clean docker-build docker-run docker-stop docker-compose-up docker-compose-down docker-compose-monitoring fmt fmt-check lint vet verify samsung-tv-test samsung-tv-run samsung-tv-doctor help
 
 GOCMD ?= go
 GOBUILD := $(GOCMD) build
@@ -83,6 +83,15 @@ verify: fmt-check
 	$(GOCMD) vet ./...
 	$(GOBUILD) -trimpath -o /tmp/stremdbc-verify $(MAIN_PATH)
 
+samsung-tv-test:
+	$(GOTEST) -race -count=1 ./...
+
+samsung-tv-run:
+	$(GORUN) $(LDFLAGS) $(MAIN_PATH) -config configs/samsung-f5500.yaml
+
+samsung-tv-doctor:
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/samsung-tv-doctor.ps1
+
 help:
 	@echo "STREMDBC Makefile commands:"
 	@echo "  build                   Build the binary"
@@ -94,5 +103,8 @@ help:
 	@echo "  fmt / fmt-check / lint  Format and run standard Go checks"
 	@echo "  vet                     Run go vet"
 	@echo "  verify                  Run the complete local verification gate"
+	@echo "  samsung-tv-test         Run unit and synthetic FFmpeg gateway tests"
+	@echo "  samsung-tv-run          Run with the Samsung F5500 config profile"
+	@echo "  samsung-tv-doctor       Run Windows Samsung TV prerequisite checks"
 	@echo "  docker-build / run      Build or run the container"
 	@echo "  docker-compose-up/down  Manage the default Compose stack"
