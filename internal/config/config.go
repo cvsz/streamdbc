@@ -81,9 +81,11 @@ type HLSConfig struct {
 }
 
 type APIConfig struct {
-	Enable      bool     `yaml:"enable"`
-	BasePath    string   `yaml:"base_path"`
-	CORSOrigins []string `yaml:"cors_origins"`
+	Enable             bool     `yaml:"enable"`
+	BasePath           string   `yaml:"base_path"`
+	CORSOrigins        []string `yaml:"cors_origins"`
+	TrustedProxies     []string `yaml:"trusted_proxies"`
+	RateLimitPerMinute int      `yaml:"rate_limit_per_minute"`
 }
 
 type LoggingConfig struct {
@@ -294,9 +296,11 @@ func DefaultConfig() *Config {
 			Format:      "mpegts",
 		},
 		API: APIConfig{
-			Enable:      true,
-			BasePath:    "/api/v1",
-			CORSOrigins: []string{"*"},
+			Enable:             true,
+			BasePath:           "/api/v1",
+			CORSOrigins:        []string{"*"},
+			TrustedProxies:     nil,
+			RateLimitPerMinute: 120,
 		},
 		Logging: LoggingConfig{
 			Level:      "info",
@@ -441,6 +445,19 @@ func (c *Config) Validate() error {
 	}
 	if err := validateCORSOrigins(c.API.CORSOrigins); err != nil {
 		return err
+	}
+	if c.API.RateLimitPerMinute < 0 || c.API.RateLimitPerMinute > 100000 {
+		return fmt.Errorf("api.rate_limit_per_minute must be between 0 and 100000")
+	}
+	for _, trusted := range c.API.TrustedProxies {
+		if strings.TrimSpace(trusted) != trusted || trusted == "" {
+			return fmt.Errorf("invalid api.trusted_proxies entry %q", trusted)
+		}
+		if ip := net.ParseIP(trusted); ip == nil {
+			if _, _, err := net.ParseCIDR(trusted); err != nil {
+				return fmt.Errorf("invalid api.trusted_proxies entry %q", trusted)
+			}
+		}
 	}
 	if err := validateRoutePath("metrics.path", c.Metrics.Path); err != nil {
 		return err
