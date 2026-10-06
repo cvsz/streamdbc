@@ -494,7 +494,7 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 		s.logger.Debug("request",
 			zap.String("method", r.Method),
-			zap.String("path", r.URL.Path),
+			zap.Int("path_length", len(r.URL.EscapedPath())),
 			zap.Duration("duration", time.Since(start)),
 		)
 	})
@@ -782,7 +782,7 @@ func (s *Server) createStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.metrics.RecordStreamCreated()
-	s.logger.Info("stream created", zap.String("id", req.ID))
+	s.logger.Info("stream created")
 	s.writeJSON(w, http.StatusCreated, stream)
 }
 
@@ -808,7 +808,7 @@ func (s *Server) deleteStream(w http.ResponseWriter, id string) {
 		s.internalError(w, "failed to delete stream")
 		return
 	}
-	s.logger.Info("stream deleted", zap.String("id", id))
+	s.logger.Info("stream deleted")
 	w.WriteHeader(http.StatusNoContent)
 }
 

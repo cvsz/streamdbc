@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 	"gopkg.in/yaml.v3"
 )
 
