@@ -13,11 +13,11 @@
   },
   "dependencies": {
     "electron-updater": "^6.3.0",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "electron": "^44.4.1",
-    "electron-builder": "^25.0.0"
+    "electron-builder": "^26.15.3"
   },
   "build": {
     "appId": "com.stremdbc.client",
