@@ -75,7 +75,8 @@ func NewServer(cfg *config.WebRTCConfig, registry *core.StreamRegistry, logger *
 		logger = zap.NewNop()
 	}
 	copyCfg := *cfg
-	copyCfg.ICEServer.URLs = append([]string(nil), cfg.ICEServer.URLs...)\n\tcopyCfg.CORSOrigins = append([]string(nil), cfg.CORSOrigins...)
+	copyCfg.ICEServer.URLs = append([]string(nil), cfg.ICEServer.URLs...)
+	copyCfg.CORSOrigins = append([]string(nil), cfg.CORSOrigins...)
 	gin.SetMode(gin.ReleaseMode)
 	meeting := &webrtc.MediaEngine{}
 	if err := meeting.RegisterDefaultCodecs(); err != nil {
