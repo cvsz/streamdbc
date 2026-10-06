@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -18,6 +19,8 @@ std::mutex g_mutex;
 std::thread g_thread;
 std::atomic<bool> g_running{false};
 ANativeWindow* g_window = nullptr;
+int g_window_width = 0;
+int g_window_height = 0;
 
 void stop_locked() {
     g_running.store(false);
@@ -28,6 +31,8 @@ void stop_locked() {
         ANativeWindow_release(g_window);
         g_window = nullptr;
     }
+    g_window_width = 0;
+    g_window_height = 0;
 }
 
 #ifdef STREAMDBC_NDI_SDK
@@ -91,7 +96,11 @@ bool resolve_source(const std::string& wanted, NDIlib_source_t& out) {
 void render_rgba(const NDIlib_video_frame_v2_t& frame) {
     if (g_window == nullptr || frame.p_data == nullptr || frame.xres <= 0 || frame.yres <= 0) return;
 
-    ANativeWindow_setBuffersGeometry(g_window, frame.xres, frame.yres, WINDOW_FORMAT_RGBA_8888);
+    if (g_window_width != frame.xres || g_window_height != frame.yres) {
+        if (ANativeWindow_setBuffersGeometry(g_window, frame.xres, frame.yres, WINDOW_FORMAT_RGBA_8888) != 0) return;
+        g_window_width = frame.xres;
+        g_window_height = frame.yres;
+    }
     ANativeWindow_Buffer buffer{};
     if (ANativeWindow_lock(g_window, &buffer, nullptr) != 0) return;
 
