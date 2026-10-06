@@ -7,13 +7,41 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  tidy-security-deps:
+    name: Tidy patched dependency graph
+    if: github.event_name == 'pull_request' && github.head_ref == 'hardening/production-grade-2026-10-06'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout hardening branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: hardening/production-grade-2026-10-06
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Tidy patched graph
+        run: go mod tidy
+      - name: Commit generated checksums
+        shell: bash
+        run: |
+          git add go.mod go.sum
+          if [ -z "$(git status --porcelain)" ]; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "security: tidy quic-go dependency graph"
+          git push origin HEAD:hardening/production-grade-2026-10-06
+
   test:
     name: Go test, vet, build
     runs-on: ubuntu-latest
