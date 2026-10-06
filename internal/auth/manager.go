@@ -11,7 +11,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/policedbc/stremdbc/internal/core"
+	"github.com/cvsz/stremdbc/internal/core"
 )
 
 var (

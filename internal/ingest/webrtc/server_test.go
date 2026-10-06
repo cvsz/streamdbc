@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/pion/webrtc/v3"
-	"github.com/policedbc/stremdbc/internal/auth"
-	"github.com/policedbc/stremdbc/internal/config"
+	"github.com/cvsz/stremdbc/internal/auth"
+	"github.com/cvsz/stremdbc/internal/config"
 	"go.uber.org/zap"
 )
 

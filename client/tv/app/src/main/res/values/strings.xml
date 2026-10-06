@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">StreamDBC TV</string>
+    <string name="no_channel">Press MENU to add an RTSP channel</string>
+</resources>

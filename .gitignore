@@ -35,9 +35,18 @@ Thumbs.db
 *.swp
 *.swo
 
-# Client
+# Desktop client
 client/dist/
 client/node_modules/
+
+# Android TV client
+client/tv/.gradle/
+client/tv/local.properties
+client/tv/**/build/
+client/tv/.idea/
+*.jks
+*.keystore
+
 # Build and distribution
 dist/
 build/

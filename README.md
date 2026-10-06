@@ -26,6 +26,37 @@ fails closed rather than claiming that control traffic is media delivery.
 The default configuration keeps all media adapters disabled. Enable an adapter
 only after supplying the corresponding production media engine and integration.
 
+## Android TV RTSP client
+
+`client/tv` is a native Android TV / Google TV client for direct RTSP playback.
+It is intentionally separate from the server media-plane claims above: the TV
+app connects directly to an operator-supplied RTSP endpoint.
+
+Current TV baseline:
+
+- Android TV launcher and D-pad-first navigation
+- Media3 ExoPlayer RTSP playback using RTP-over-TCP
+- multi-channel local list with previous/next channel switching
+- exponential reconnect on playback failure
+- RTSP URL validation and credential redaction
+- encrypted channel storage using Android Keystore AES-GCM
+- no plaintext credential logging
+- screen-awake playback behavior
+- JVM unit tests plus dedicated Android build/lint CI
+
+RTSP is not encrypted in transit. For cameras outside a trusted LAN, place RTSP
+behind a private VPN such as WireGuard/Tailscale rather than exposing port 554
+or 8554 publicly.
+
+Build with JDK 17, Android SDK 36, Gradle 9.6.0 and AGP 9.4.0:
+
+```bash
+cd client/tv
+gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+```
+
+The debug APK is produced under `client/tv/app/build/outputs/apk/debug/`.
+
 ## Local quick start
 
 Requires Go 1.27 or newer. FFmpeg is required only when using the recorder or
@@ -111,6 +142,7 @@ adapters.
 - Static delivery rejects traversal and symlink escapes, and media/control parsers enforce size limits and deadlines.
 - RTMP/RTSP ingest is rejected by configuration when authentication is enabled until publish-token enforcement is integrated into those protocols.
 - Compose binds host ports to loopback until an operator deliberately changes the exposure policy.
+- Android TV channel configuration is encrypted at rest with a non-exportable Android Keystore key; RTSP transport itself remains plaintext unless protected by the network layer.
 
 ## Project structure
 
@@ -121,15 +153,17 @@ internal/api/            management HTTP API
 internal/auth/           JWT and API-key controls
 internal/cluster/        Redis coordination primitives
 internal/core/           stream registry and safe identifiers
-internal/dvr/             file-backed DVR manager
-internal/ingest/          bounded protocol adapters
-internal/output/          HLS/LL-HLS and output adapters
-internal/recorder/        FFmpeg recording manager
-internal/transcoder/      FFmpeg ABR worker pool
-internal/metrics/         Prometheus telemetry
-web/                      zero-build dashboard and player
-deployments/              deployment assets
-.github/workflows/        CI and CodeQL definitions
+internal/dvr/            file-backed DVR manager
+internal/ingest/         bounded protocol adapters
+internal/output/         HLS/LL-HLS and output adapters
+internal/recorder/       FFmpeg recording manager
+internal/transcoder/     FFmpeg ABR worker pool
+internal/metrics/        Prometheus telemetry
+web/                     zero-build dashboard and player
+client/                  desktop client
+client/tv/               native Android TV RTSP client
+deployments/             deployment assets
+.github/workflows/       CI and CodeQL definitions
 ```
 
 ## Release gates
@@ -137,13 +171,15 @@ deployments/              deployment assets
 Local checks are reproducible with `make verify` and include formatting,
 module verification/tidiness, race tests, `staticcheck`, `gosec`, `go vet`,
 and a trimmed build.
-Hosted CI/CodeQL execution, container registry publication, third-party
-protocol interoperability, real ingest-to-HLS/WebRTC forwarding, soak/load
-testing, TURN/TLS public-network validation, and secret-manager integration
-remain external release gates. This checkout does not provide evidence for
-those gates. `govulncheck` currently reports `GO-2026-4479` in the Pion DTLS
-dependency with no upstream fixed version; keep WebRTC disabled until that
-advisory is resolved or formally accepted with compensating controls.
+Hosted CI/CodeQL execution, Android CI, container registry publication,
+third-party protocol interoperability, real ingest-to-HLS/WebRTC forwarding,
+soak/load testing, TURN/TLS public-network validation, device-level Android TV
+playback validation, and secret-manager integration remain external release
+gates. This checkout does not claim those gates are complete.
+
+## Repository
+
+Canonical repository: https://github.com/cvsz/streamdbc
 
 ## License
 

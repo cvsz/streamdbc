@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	pion "github.com/pion/webrtc/v3"
-	"github.com/policedbc/stremdbc/internal/config"
+	"github.com/cvsz/stremdbc/internal/config"
 	"go.uber.org/zap"
 )
 

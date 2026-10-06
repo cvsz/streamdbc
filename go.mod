@@ -1,4 +1,4 @@
-module github.com/policedbc/stremdbc
+module github.com/cvsz/stremdbc
 
 go 1.27.0
 
