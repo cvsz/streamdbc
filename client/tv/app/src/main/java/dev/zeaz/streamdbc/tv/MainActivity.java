@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -27,6 +29,7 @@ public final class MainActivity extends Activity {
     private TextView status;
     private LinearLayout overlay;
     private int currentIndex;
+    private NdiDiscoveryManager ndiDiscovery;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -57,6 +60,7 @@ public final class MainActivity extends Activity {
         setContentView(root);
 
         store = new SecureStreamStore(this);
+        ndiDiscovery = new NdiDiscoveryManager(this);
         try {
             channels.addAll(store.load());
         } catch (Exception e) {
@@ -100,6 +104,7 @@ public final class MainActivity extends Activity {
     private void manageChannels() {
         List<String> items = new ArrayList<>();
         items.add(getString(R.string.add_rtsp_channel));
+        items.add(getString(R.string.discover_ndi));
         if (!channels.isEmpty()) items.add(getString(R.string.remove_current_channel));
         for (StreamConfig c : channels) items.add(getString(R.string.play_channel, c.name()));
 
@@ -110,13 +115,17 @@ public final class MainActivity extends Activity {
                         showAddDialog();
                         return;
                     }
-                    int offset = 1;
+                    if (which == 1) {
+                        discoverNdiSources();
+                        return;
+                    }
+                    int offset = 2;
                     if (!channels.isEmpty()) {
-                        if (which == 1) {
+                        if (which == 2) {
                             removeCurrent();
                             return;
                         }
-                        offset = 2;
+                        offset = 3;
                     }
                     int index = which - offset;
                     if (index >= 0 && index < channels.size()) {
@@ -125,6 +134,28 @@ public final class MainActivity extends Activity {
                     }
                 })
                 .show();
+    }
+
+    private void discoverNdiSources() {
+        ndiDiscovery.start();
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            ndiDiscovery.stop();
+            List<String> sources = ndiDiscovery.snapshot();
+            if (sources.isEmpty()) {
+                showToast(getString(R.string.ndi_none_found));
+                return;
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.ndi_sources_title)
+                    .setItems(sources.toArray(new String[0]), (dialog, which) -> {
+                        if (NdiRuntime.isAvailable()) {
+                            showToast(getString(R.string.ndi_runtime_present));
+                        } else {
+                            showToast(getString(R.string.ndi_runtime_missing));
+                        }
+                    })
+                    .show();
+        }, 2500L);
     }
 
     private void showAddDialog() {
@@ -222,6 +253,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        ndiDiscovery.stop();
         playback.release();
         super.onDestroy();
     }
