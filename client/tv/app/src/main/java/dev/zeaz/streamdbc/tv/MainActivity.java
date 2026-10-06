@@ -9,6 +9,7 @@ import android.os.Looper;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.SurfaceView;
 import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -30,6 +31,9 @@ public final class MainActivity extends Activity {
     private LinearLayout overlay;
     private int currentIndex;
     private NdiDiscoveryManager ndiDiscovery;
+    private NdiReceiver ndiReceiver;
+    private SurfaceView ndiSurface;
+    private PlayerView playerView;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -39,8 +43,13 @@ public final class MainActivity extends Activity {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
 
-        PlayerView playerView = new PlayerView(this);
+        playerView = new PlayerView(this);
         root.addView(playerView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        ndiSurface = new SurfaceView(this);
+        ndiSurface.setVisibility(View.GONE);
+        root.addView(ndiSurface, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
         overlay = new LinearLayout(this);
@@ -61,6 +70,7 @@ public final class MainActivity extends Activity {
 
         store = new SecureStreamStore(this);
         ndiDiscovery = new NdiDiscoveryManager(this);
+        ndiReceiver = new NdiReceiver();
         try {
             channels.addAll(store.load());
         } catch (Exception e) {
@@ -148,14 +158,30 @@ public final class MainActivity extends Activity {
             new AlertDialog.Builder(this)
                     .setTitle(R.string.ndi_sources_title)
                     .setItems(sources.toArray(new String[0]), (dialog, which) -> {
-                        if (NdiRuntime.isAvailable()) {
-                            showToast(getString(R.string.ndi_runtime_present));
-                        } else {
+                        if (!ndiReceiver.isAvailable()) {
                             showToast(getString(R.string.ndi_runtime_missing));
+                            return;
                         }
+                        startNdiSource(sources.get(which));
                     })
                     .show();
         }, 2500L);
+    }
+
+    private void startNdiSource(String sourceName) {
+        playback.release();
+        playerView.setVisibility(View.GONE);
+        ndiSurface.setVisibility(View.VISIBLE);
+        boolean started = ndiReceiver.start(sourceName, ndiSurface.getHolder().getSurface());
+        if (!started) {
+            ndiSurface.setVisibility(View.GONE);
+            playerView.setVisibility(View.VISIBLE);
+            showToast(getString(R.string.ndi_start_failed));
+            playback = new RtspPlaybackController(this, playerView, value -> runOnUiThread(() -> status.setText(value)));
+            return;
+        }
+        title.setText(getString(R.string.ndi_live, sourceName));
+        status.setText(getString(R.string.ndi_live, sourceName));
     }
 
     private void showAddDialog() {
@@ -254,6 +280,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         ndiDiscovery.stop();
+        ndiReceiver.stop();
         playback.release();
         super.onDestroy();
     }
