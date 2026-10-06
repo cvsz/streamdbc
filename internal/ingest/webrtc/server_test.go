@@ -81,7 +81,7 @@ func TestWebRTCAnonymousPlaybackDoesNotAuthorizePublishing(t *testing.T) {
 }
 
 func TestWebRTCProvidesDeleteSessionCORSPreflight(t *testing.T) {
-	server, err := NewServer(&config.WebRTCConfig{}, nil, zap.NewNop())
+	server, err := NewServer(&config.WebRTCConfig{CORSOrigins: []string{"https://player.example"}}, nil, zap.NewNop())
 	if err != nil {
 		t.Fatalf("new WebRTC server: %v", err)
 	}
