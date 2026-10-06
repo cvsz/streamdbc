@@ -20,23 +20,21 @@ function Report-Check {
 
 Report-Check ($env:OS -eq "Windows_NT") "Windows" ([System.Environment]::OSVersion.VersionString)
 
-$addresses = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-    Where-Object { $_.IPAddress -notlike "169.254.*" -and $_.IPAddress -ne "127.0.0.1" -and $_.AddressState -eq "Preferred" })
-$wifiAddress = $addresses | Where-Object { $_.InterfaceAlias -match "Wi-Fi|Wireless|WLAN" } | Select-Object -First 1
-$lanAddress = $wifiAddress
-if ($null -eq $lanAddress) { $lanAddress = $addresses | Select-Object -First 1 }
+. (Join-Path $PSScriptRoot "samsung-tv-common.ps1")
+
+$lanAddress = Get-SamsungTVLanAddress
 Report-Check ($null -ne $lanAddress) "LAN IPv4" $(if ($lanAddress) { "{0} on {1}" -f $lanAddress.IPAddress, $lanAddress.InterfaceAlias } else { "No active LAN IPv4 address found" })
-Report-Check ($null -ne $wifiAddress) "Wi-Fi interface" $(if ($wifiAddress) { $wifiAddress.InterfaceAlias } else { "Connect the PC to Wi-Fi or Ethernet on the TV LAN" })
+Report-Check ($null -ne $lanAddress) "Wi-Fi interface" $(if ($lanAddress) { "{0} ({1})" -f $lanAddress.InterfaceAlias, $lanAddress.Description } else { "Connect the PC to Wi-Fi or Ethernet on the TV LAN" })
 
 $networkProfile = Get-NetConnectionProfile -ErrorAction SilentlyContinue |
     Where-Object { $_.InterfaceAlias -eq $lanAddress.InterfaceAlias } | Select-Object -First 1
 Report-Check ($null -ne $networkProfile -and $networkProfile.NetworkCategory -eq "Private") "Private network" $(if ($networkProfile) { $networkProfile.NetworkCategory } else { "Set the active LAN connection to Private" })
 
-$ffmpeg = Get-Command -Name $FFmpegPath -ErrorAction SilentlyContinue
-Report-Check ($null -ne $ffmpeg) "FFmpeg" $(if ($ffmpeg) { $ffmpeg.Source } else { "Install FFmpeg or pass -FFmpegPath" })
+$ffmpegSource = Get-SamsungTVFFmpegPath -Requested $FFmpegPath
+Report-Check ($null -ne $ffmpegSource) "FFmpeg" $(if ($ffmpegSource) { $ffmpegSource } else { "Install FFmpeg with DirectShow and libx264, or pass -FFmpegPath" })
 $deviceOutput = ""
-if ($ffmpeg) {
-    $deviceOutput = (& $ffmpeg.Source -hide_banner -list_devices true -f dshow -i dummy 2>&1 | Out-String)
+if ($ffmpegSource) {
+    $deviceOutput = (& $ffmpegSource -hide_banner -list_devices true -f dshow -i dummy 2>&1 | Out-String)
 }
 $vmixProcess = Get-Process -Name "vmix64", "vmix" -ErrorAction SilentlyContinue | Select-Object -First 1
 Report-Check ($null -ne $vmixProcess) "vMix running" $(if ($vmixProcess) { $vmixProcess.ProcessName } else { "Start vMix and enable External Output" })

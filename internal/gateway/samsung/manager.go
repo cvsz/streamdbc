@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -117,6 +118,48 @@ func NewManager(cfg *config.SamsungTVConfig, logger *zap.Logger) (*Manager, erro
 	return newManager(cfg, nil, logger)
 }
 
+// resolveFFmpeg locates the FFmpeg executable the gateway will run. An explicit
+// configured path is honoured first. When that path is a bare command name it is
+// resolved from PATH, and if PATH has no FFmpeg the gateway falls back to a
+// StreamDBC-managed build under the per-user application data directory. The
+// fallback keeps the Windows one-click flow working on hosts where FFmpeg was
+// installed beside StreamDBC instead of onto the system PATH.
+func resolveFFmpeg(configured string) string {
+	if resolved, err := exec.LookPath(configured); err == nil {
+		return resolved
+	}
+	if filepath.IsAbs(configured) {
+		return ""
+	}
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData == "" {
+		return ""
+	}
+	managedRoot := filepath.Join(localAppData, "StreamDBC", "FFmpeg")
+	entries, err := os.ReadDir(managedRoot)
+	if err != nil {
+		return ""
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	// Newest managed version wins, so the directory listing is sorted descending.
+	sort.Sort(sort.Reverse(sort.StringSlice(names)))
+	candidates := []string{"ffmpeg.exe", "ffmpeg"}
+	for _, name := range names {
+		for _, candidate := range candidates {
+			path := filepath.Join(managedRoot, name, candidate)
+			if info, err := os.Stat(path); err == nil && !info.IsDir() {
+				return path
+			}
+		}
+	}
+	return ""
+}
+
 // newManager accepts a process runner for lifecycle tests while production
 // construction always resolves and starts the configured FFmpeg executable.
 func newManager(cfg *config.SamsungTVConfig, runner processRunner, logger *zap.Logger) (*Manager, error) {
@@ -138,8 +181,8 @@ func newManager(cfg *config.SamsungTVConfig, runner processRunner, logger *zap.L
 	}
 	executable := copyCfg.FFmpegPath
 	if runner == nil && copyCfg.Enable {
-		resolved, err := exec.LookPath(executable)
-		if err != nil {
+		resolved := resolveFFmpeg(executable)
+		if resolved == "" {
 			return nil, fmt.Errorf("FFmpeg executable is not available")
 		}
 		executable = resolved

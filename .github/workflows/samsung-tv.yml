@@ -2,7 +2,7 @@ name: Samsung TV Gateway
 
 on:
   push:
-    branches: [main, feat/samsung-f5500-wifi-hls]
+    branches: [main, "feat/**", "fix/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
