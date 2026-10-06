@@ -10,6 +10,10 @@ yuv420p, AAC-LC stereo at 48 kHz, two-second MPEG-TS segments, and a six-entry
 playlist. Typical glass-to-glass latency is approximately 6–15 seconds. The
 optional 1080p profile has not been validated on the UA40F5500.
 
+DirectShow negotiates the frame rate exposed by the vMix device; the gateway
+then encodes the selected profile frame rate. This supports vMix outputs that
+offer 60 fps even when the Samsung profile is 30 fps.
+
 ## 1. Requirements
 
 - Windows PC running vMix and StreamDBC.

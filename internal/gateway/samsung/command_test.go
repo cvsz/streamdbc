@@ -40,7 +40,7 @@ func TestBuildArgsUsesSamsungDirectShowHLSBaseline(t *testing.T) {
 	if !slices.Contains(args, filepath.Join(cfg.OutputPath, "segment_%06d.ts")) || !slices.Contains(args, filepath.Join(cfg.OutputPath, "index.m3u8")) {
 		t.Fatalf("playlist and segment paths must use the configured output root: %v", args)
 	}
-	if !hasSequence(args, "-f", "dshow", "-video_size", "1280x720", "-framerate", "30", "-i", `video="vMix Video":audio="vMix Audio"`) {
+	if !hasSequence(args, "-rtbufsize", "64M", "-f", "dshow", "-video_size", "1280x720", "-i", `video="vMix Video":audio="vMix Audio"`) {
 		t.Fatalf("DirectShow input options are missing or ordered incorrectly: %v", args)
 	}
 	if slices.Contains(args, "independent_segments") || slices.Contains(args, "append_list") {
