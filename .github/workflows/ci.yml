@@ -32,7 +32,13 @@ jobs:
         run: go mod verify
 
       - name: Check formatting
-        run: test -z "$(gofmt -l .)"
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "gofmt required for:"
+            echo "$files"
+            exit 1
+          fi
 
       - name: Check module tidiness
         run: go mod tidy -diff
