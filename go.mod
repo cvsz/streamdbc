@@ -6,7 +6,7 @@ require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.5.0
-	github.com/pion/webrtc/v3 v3.3.6
+	github.com/pion/webrtc/v4 v4.2.19
 	github.com/prometheus/client_golang v1.18.0
 	github.com/redis/go-redis/v9 v9.22.0
 	go.uber.org/zap v1.28.0
