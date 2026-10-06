@@ -1,6 +1,7 @@
 package samsung
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -46,6 +47,7 @@ type commandRunner struct{}
 type commandProcess struct {
 	cmd         *exec.Cmd
 	stdinWriter *os.File
+	stderrBuf   *bytes.Buffer
 }
 
 func (commandRunner) Start(ctx context.Context, executable string, args []string) (process, error) {
@@ -57,7 +59,9 @@ func (commandRunner) Start(ctx context.Context, executable string, args []string
 	}
 	cmd.Stdin = stdinReader
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// Capture stderr for debugging
+	stderrBuf := new(bytes.Buffer)
+	cmd.Stderr = stderrBuf
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Cancel = func() error {
 		_, writeErr := stdinWriter.Write([]byte("q\n"))
@@ -73,7 +77,7 @@ func (commandRunner) Start(ctx context.Context, executable string, args []string
 		return nil, err
 	}
 	_ = stdinReader.Close()
-	return &commandProcess{cmd: cmd, stdinWriter: stdinWriter}, nil
+	return &commandProcess{cmd: cmd, stdinWriter: stdinWriter, stderrBuf: stderrBuf}, nil
 }
 
 func (p *commandProcess) Wait() error {
@@ -342,7 +346,16 @@ func (m *Manager) run(ctx context.Context, gen uint64, done chan struct{}) {
 			return
 		}
 		exitedAt := time.Now().UTC()
-		m.recordFailure(gen, describeExit(waitErr), exitedAt)
+		// Capture stderr from the process for debugging
+		var stderr string
+		if cp, ok := child.(*commandProcess); ok && cp.stderrBuf != nil {
+			stderr = cp.stderrBuf.String()
+		}
+		msg := describeExit(waitErr)
+		if stderr != "" {
+			msg += "; stderr: " + stderr
+		}
+		m.recordFailure(gen, msg, exitedAt)
 		if !m.cfg.AutoRestart {
 			m.finish(gen, StateFailed)
 			return

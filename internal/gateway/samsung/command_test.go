@@ -24,7 +24,7 @@ func TestBuildArgsUsesSamsungDirectShowHLSBaseline(t *testing.T) {
 		t.Fatalf("BuildArgs: %v", err)
 	}
 	for _, expected := range []string{
-		"dshow", "1280x720", `video="vMix Video":audio="vMix Audio"`,
+		"dshow", "1280x720", "video=vMix Video:audio=vMix Audio",
 		"libx264", "main", "3.1", "yuv420p", "30", "60", "3500000", "4000000", "7000000",
 		"aac", "aac_low", "48000", "mpegts", "delete_segments+temp_file",
 	} {
@@ -40,7 +40,7 @@ func TestBuildArgsUsesSamsungDirectShowHLSBaseline(t *testing.T) {
 	if !slices.Contains(args, filepath.Join(cfg.OutputPath, "segment_%06d.ts")) || !slices.Contains(args, filepath.Join(cfg.OutputPath, "index.m3u8")) {
 		t.Fatalf("playlist and segment paths must use the configured output root: %v", args)
 	}
-	if !hasSequence(args, "-rtbufsize", "64M", "-f", "dshow", "-video_size", "1280x720", "-i", `video="vMix Video":audio="vMix Audio"`) {
+	if !hasSequence(args, "-rtbufsize", "64M", "-f", "dshow", "-video_size", "1280x720", "-i", `video=vMix Video:audio=vMix Audio`) {
 		t.Fatalf("DirectShow input options are missing or ordered incorrectly: %v", args)
 	}
 	if slices.Contains(args, "independent_segments") || slices.Contains(args, "append_list") {

@@ -34,7 +34,7 @@ func BuildArgs(cfg config.SamsungTVConfig) ([]string, error) {
 			"-rtbufsize", "64M",
 			"-f", "dshow",
 			"-video_size", fmt.Sprintf("%dx%d", cfg.Width, cfg.Height),
-			"-i", fmt.Sprintf(`video="%s":audio="%s"`, cfg.VideoDevice, cfg.AudioDevice),
+			"-i", fmt.Sprintf("video=%s:audio=%s", cfg.VideoDevice, cfg.AudioDevice),
 			"-map", "0:v:0", "-map", "0:a:0",
 		)
 	} else {
