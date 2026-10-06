@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, dialog, shell, powerSaveBlocker, globalShortcut } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, dialog, shell, powerSaveBlocker, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -9,7 +9,6 @@ let tray = null;
 let playerWindow = null;
 let settings = {
   serverUrl: 'http://localhost:8085',
-  apiKey: '',
   autoStart: false,
   notifications: true,
   minimizeToTray: true,
@@ -17,25 +16,84 @@ let settings = {
 };
 
 const STREAMDBC_SERVER_PORT = 1935;
+let apiKey = '';
+
+function getSettingsPath() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function getCredentialPath() {
+  return path.join(app.getPath('userData'), 'credentials.json');
+}
+
+function publicSettings() {
+  return { ...settings, hasApiKey: Boolean(apiKey) };
+}
+
+function loadAPIKey() {
+  try {
+    if (!safeStorage.isEncryptionAvailable() || !fs.existsSync(getCredentialPath())) return '';
+    const payload = JSON.parse(fs.readFileSync(getCredentialPath(), 'utf8'));
+    if (payload.version !== 1 || typeof payload.apiKey !== 'string') return '';
+    return safeStorage.decryptString(Buffer.from(payload.apiKey, 'base64'));
+  } catch {
+    console.error('Failed to load encrypted API key');
+    return '';
+  }
+}
+
+function saveAPIKey(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    try { fs.rmSync(getCredentialPath(), { force: true }); } catch {}
+    apiKey = '';
+    return;
+  }
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('OS credential encryption is unavailable');
+  const encrypted = safeStorage.encryptString(normalized).toString('base64');
+  fs.writeFileSync(getCredentialPath(), JSON.stringify({ version: 1, apiKey: encrypted }), { mode: 0o600 });
+  apiKey = normalized;
+}
+
+function normalizeServerUrl(value) {
+  const parsed = new URL(String(value || '').trim());
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error('Server URL must be HTTP(S) without embedded credentials');
+  }
+  return parsed.toString().replace(/\/$/, '');
+}
+
+async function openTrustedExternal(value) {
+  const parsed = new URL(String(value || ''));
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com') {
+    throw new Error('External URL is not allowed');
+  }
+  await shell.openExternal(parsed.toString());
+}
 
 function loadSettings() {
-  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
   try {
-    if (fs.existsSync(settingsPath)) {
-      const data = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    if (fs.existsSync(getSettingsPath())) {
+      const data = JSON.parse(fs.readFileSync(getSettingsPath(), 'utf8'));
+      if (typeof data.apiKey === 'string' && data.apiKey) {
+        apiKey = data.apiKey;
+        delete data.apiKey;
+        saveAPIKey(apiKey);
+        fs.writeFileSync(getSettingsPath(), JSON.stringify(data, null, 2), { mode: 0o600 });
+      }
       settings = { ...settings, ...data };
     }
-  } catch (err) {
-    console.error('Failed to load settings:', err);
+    if (!apiKey) apiKey = loadAPIKey();
+  } catch {
+    console.error('Failed to load settings');
   }
 }
 
 function saveSettings() {
-  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
   try {
-    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-  } catch (err) {
-    console.error('Failed to save settings:', err);
+    fs.writeFileSync(getSettingsPath(), JSON.stringify(settings, null, 2), { mode: 0o600 });
+  } catch {
+    console.error('Failed to save settings');
   }
 }
 
@@ -64,13 +122,15 @@ function createMainWindow() {
       contextIsolation: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
-      experimentalFeatures: true
+      sandbox: true
     },
     titleBarStyle: 'native',
     autoHideMenuBar: false
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
 
   mainWindow.on('close', (event) => {
     if (settings.minimizeToTray && !app.isQuitting) {
@@ -114,12 +174,14 @@ function createPlayerWindow(streamId) {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: true
+      webSecurity: true,
+      sandbox: true
     }
   });
 
   const playerUrl = `file://${path.join(__dirname, 'player.html')}?stream=${encodeURIComponent(streamId)}&server=${encodeURIComponent(settings.serverUrl)}`;
   playerWindow.loadURL(playerUrl);
+  playerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   playerWindow.on('closed', () => {
     playerWindow = null;
@@ -268,13 +330,13 @@ function createMenu() {
         {
           label: 'Documentation',
           click: () => {
-            shell.openExternal('https://github.com/cvsz/streamdbc/blob/main/docs/USER-MANUAL.md');
+            openTrustedExternal('https://github.com/cvsz/streamdbc/blob/main/docs/USER-MANUAL.md');
           }
         },
         {
           label: 'Report Issue',
           click: () => {
-            shell.openExternal('https://github.com/cvsz/streamdbc/issues');
+            openTrustedExternal('https://github.com/cvsz/streamdbc/issues');
           }
         },
         { type: 'separator' },
@@ -333,10 +395,11 @@ async function checkForUpdates() {
 }
 
 async function fetchStreamInfo(serverUrl, streamId) {
+  serverUrl = normalizeServerUrl(serverUrl);
   try {
     const url = new URL(`/api/v1/streams/${encodeURIComponent(streamId)}`, serverUrl);
     const req = http.get(url.toString(), {
-      headers: settings.apiKey ? { 'X-API-Key': settings.apiKey } : {}
+      headers: apiKey ? { 'X-API-Key': apiKey } : {}
     }, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
@@ -356,11 +419,12 @@ async function fetchStreamInfo(serverUrl, streamId) {
 }
 
 async function fetchStreams(serverUrl) {
+  serverUrl = normalizeServerUrl(serverUrl);
   try {
     const url = new URL('/api/v1/streams', serverUrl);
     return new Promise((resolve) => {
       http.get(url.toString(), {
-        headers: settings.apiKey ? { 'X-API-Key': settings.apiKey } : {}
+        headers: apiKey ? { 'X-API-Key': apiKey } : {}
       }, (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
@@ -379,11 +443,12 @@ async function fetchStreams(serverUrl) {
 }
 
 async function fetchHealth(serverUrl) {
+  serverUrl = normalizeServerUrl(serverUrl);
   try {
     const url = new URL('/health', serverUrl);
     return new Promise((resolve) => {
       http.get(url.toString(), {
-        headers: settings.apiKey ? { 'X-API-Key': settings.apiKey } : {}
+        headers: apiKey ? { 'X-API-Key': apiKey } : {}
       }, (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
@@ -402,6 +467,7 @@ async function fetchHealth(serverUrl) {
 }
 
 async function createStream(serverUrl, streamId, name) {
+  serverUrl = normalizeServerUrl(serverUrl);
   try {
     const url = new URL('/api/v1/streams', serverUrl);
     return new Promise((resolve) => {
@@ -409,7 +475,7 @@ async function createStream(serverUrl, streamId, name) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(settings.apiKey ? { 'X-API-Key': settings.apiKey } : {})
+          ...(apiKey ? { 'X-API-Key': apiKey } : {})
         }
       }, (res) => {
         let data = '';
@@ -432,13 +498,14 @@ async function createStream(serverUrl, streamId, name) {
 }
 
 async function deleteStream(serverUrl, streamId) {
+  serverUrl = normalizeServerUrl(serverUrl);
   try {
     const url = new URL(`/api/v1/streams/${encodeURIComponent(streamId)}`, serverUrl);
     return new Promise((resolve) => {
       const req = http.request(url, {
         method: 'DELETE',
         headers: {
-          ...(settings.apiKey ? { 'X-API-Key': settings.apiKey } : {})
+          ...(apiKey ? { 'X-API-Key': apiKey } : {})
         }
       }, (res) => {
         resolve({ success: res.statusCode === 200 || res.statusCode === 204 });
@@ -452,6 +519,7 @@ async function deleteStream(serverUrl, streamId) {
 }
 
 async function getAuthToken(serverUrl, streamId, action) {
+  serverUrl = normalizeServerUrl(serverUrl);
   try {
     const url = new URL('/api/v1/auth/token', serverUrl);
     return new Promise((resolve) => {
@@ -459,7 +527,7 @@ async function getAuthToken(serverUrl, streamId, action) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(settings.apiKey ? { 'X-API-Key': settings.apiKey } : {})
+          ...(apiKey ? { 'X-API-Key': apiKey } : {})
         }
       }, (res) => {
         let data = '';
@@ -493,7 +561,7 @@ app.whenReady().then(() => {
   powerSaveBlocker.start('prevent-display-sleep');
 
   const serverUrl = settings.serverUrl;
-  mainWindow.webContents.send('settings-updated', settings);
+  mainWindow.webContents.send('settings-updated', publicSettings());
 
   setInterval(async () => {
     if (mainWindow && mainWindow.isVisible()) {
@@ -504,7 +572,7 @@ app.whenReady().then(() => {
     }
   }, 5000);
 
-  mainWindow.webContents.send('settings-updated', settings);
+  mainWindow.webContents.send('settings-updated', publicSettings());
 });
 
 app.on('before-quit', () => {
@@ -526,12 +594,17 @@ app.on('activate', () => {
   }
 });
 
-ipcMain.handle('get-settings', () => settings);
+ipcMain.handle('get-settings', () => publicSettings());
 
 ipcMain.handle('save-settings', (event, newSettings) => {
-  settings = { ...settings, ...newSettings };
+  const next = { ...newSettings };
+  const nextApiKey = typeof next.apiKey === 'string' ? next.apiKey.trim() : '';
+  delete next.apiKey;
+  if (next.serverUrl !== undefined) next.serverUrl = normalizeServerUrl(next.serverUrl);
+  settings = { ...settings, ...next };
+  if (nextApiKey) saveAPIKey(nextApiKey);
   saveSettings();
-  return settings;
+  return publicSettings();
 });
 
 ipcMain.handle('fetch-health', async (event, serverUrl) => {
@@ -577,12 +650,22 @@ ipcMain.handle('select-file', async () => {
   return result;
 });
 
-ipcMain.handle('show-error', (event, { title, message }) => {
-  dialog.showErrorBox(title, message);
+ipcMain.handle('show-error', async (event, { title, message }) => {
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'warning',
+    title: String(title || 'Confirm'),
+    message: String(message || 'Continue?'),
+    buttons: ['Delete', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true
+  });
+  return result.response === 0;
 });
 
-ipcMain.handle('open-external', (event, url) => {
-  shell.openExternal(url);
+ipcMain.handle('open-external', async (event, url) => {
+  await openTrustedExternal(url);
+  return true;
 });
 
 ipcMain.on('minimize-to-tray', () => {
