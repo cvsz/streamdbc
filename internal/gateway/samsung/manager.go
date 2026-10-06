@@ -152,6 +152,7 @@ func resolveFFmpeg(configured string) string {
 	for _, name := range names {
 		for _, candidate := range candidates {
 			path := filepath.Join(managedRoot, name, candidate)
+			// #nosec G703 -- name is from ReadDir, candidate is hardcoded; no user taint
 			if info, err := os.Stat(path); err == nil && !info.IsDir() {
 				return path
 			}
