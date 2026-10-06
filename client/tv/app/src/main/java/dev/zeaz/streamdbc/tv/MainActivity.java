@@ -67,7 +67,7 @@ public final class MainActivity extends Activity {
 
         if (channels.isEmpty()) {
             title.setText(getString(R.string.no_channel));
-            status.setText(R.string.menu_manage_channels)
+            status.setText(R.string.menu_manage_channels);
             overlay.setVisibility(View.VISIBLE);
         } else {
             playCurrent();
@@ -171,7 +171,7 @@ public final class MainActivity extends Activity {
         new AlertDialog.Builder(this)
                 .setTitle(getString(R.string.remove_channel_title, current.name()))
                 .setMessage(R.string.remove_channel_message)
-                .setNegativeButton("Cancel", null)
+                .setNegativeButton(R.string.cancel, null)
                 .setPositiveButton(R.string.remove, (d, w) -> {
                     channels.remove(currentIndex);
                     if (currentIndex >= channels.size()) currentIndex = Math.max(0, channels.size() - 1);
@@ -182,7 +182,7 @@ public final class MainActivity extends Activity {
                     }
                     if (channels.isEmpty()) {
                         title.setText(getString(R.string.no_channel));
-                        status.setText("MENU: manage channels");
+                        status.setText(R.string.menu_manage_channels);
                     } else {
                         playCurrent();
                     }
