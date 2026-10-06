@@ -5,6 +5,7 @@ plugins {
 android {
     namespace = "dev.zeaz.streamdbc.tv"
     compileSdk = 37
+    ndkVersion = "30.0.16248370"
 
     defaultConfig {
         applicationId = "dev.zeaz.streamdbc.tv"
@@ -21,6 +22,19 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            jniLibs.srcDir("../vendor/ndi/jniLibs")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 
