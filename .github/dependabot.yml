@@ -43,3 +43,14 @@ updates:
       actions-security-and-maintenance:
         patterns:
           - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      container-security-and-maintenance:
+        patterns:
+          - "*"

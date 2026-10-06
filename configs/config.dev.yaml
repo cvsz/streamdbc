@@ -34,6 +34,8 @@ webrtc:
   tls_enabled: false
   cert_file: ""
   key_file: ""
+  cors_origins:
+    - "http://localhost:8080"
 
 hls:
   enable: false
@@ -77,6 +79,8 @@ api:
   base_path: "/api/v1"
   cors_origins:
     - "*"
+  trusted_proxies: []
+  rate_limit_per_minute: 120
 
 logging:
   level: "debug"

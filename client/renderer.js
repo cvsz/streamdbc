@@ -24,7 +24,8 @@ async function loadSettings() {
 
 function applySettings() {
   $('serverUrl').value = settings.serverUrl || '';
-  $('apiKey').value = settings.apiKey || '';
+  $('apiKey').value = '';
+  $('apiKey').placeholder = settings.hasApiKey ? 'Stored securely — enter to replace' : 'Your API key';
   $('notifications').checked = settings.notifications !== false;
   $('minimizeToTray').checked = settings.minimizeToTray !== false;
 }

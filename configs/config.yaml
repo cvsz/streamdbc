@@ -37,6 +37,8 @@ webrtc:
   tls_enabled: false
   cert_file: ""
   key_file: ""
+  cors_origins:
+    - "${STREMDBC_CORS_ORIGIN}"
 
 hls:
   # The HLS writer is a library component; the executable has no media graph.
@@ -81,6 +83,8 @@ api:
   base_path: "/api/v1"
   cors_origins:
     - "${STREMDBC_CORS_ORIGIN}"
+  trusted_proxies: []
+  rate_limit_per_minute: 120
 
 logging:
   level: "info"

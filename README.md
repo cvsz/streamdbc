@@ -42,13 +42,13 @@ Current TV baseline:
 - encrypted channel storage using Android Keystore AES-GCM
 - no plaintext credential logging
 - screen-awake playback behavior
-- JVM unit tests plus dedicated Android build/lint CI
+- JVM unit tests plus dedicated Android build/lint CI\n- NDI Surface lifecycle synchronization; optional native NDI video receiver remains gated by the licensed SDK
 
 RTSP is not encrypted in transit. For cameras outside a trusted LAN, place RTSP
 behind a private VPN such as WireGuard/Tailscale rather than exposing port 554
 or 8554 publicly.
 
-Build with JDK 17, Android SDK 36, Gradle 9.6.0 and AGP 9.4.0:
+Build with JDK 17, Android SDK 36, Gradle 9.6.0 and AGP 9.4.1:
 
 ```bash
 cd client/tv
@@ -142,7 +142,7 @@ adapters.
 - Static delivery rejects traversal and symlink escapes, and media/control parsers enforce size limits and deadlines.
 - RTMP/RTSP ingest is rejected by configuration when authentication is enabled until publish-token enforcement is integrated into those protocols.
 - Compose binds host ports to loopback until an operator deliberately changes the exposure policy.
-- Android TV channel configuration is encrypted at rest with a non-exportable Android Keystore key; RTSP transport itself remains plaintext unless protected by the network layer.
+- Android TV channel configuration is encrypted at rest with a non-exportable Android Keystore key; RTSP transport itself remains plaintext unless protected by the network layer.\n- Desktop management API credentials are stored with Electron safeStorage rather than plaintext settings.\n- WebRTC browser access uses an explicit configured CORS allowlist.\n- Management API requests are rate-limited per client and forwarded client-IP headers are accepted only from configured trusted proxies.
 
 ## Project structure
 

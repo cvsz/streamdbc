@@ -2,3 +2,6 @@
 client/dist/
 client/node_modules/
 client/build/
+
+# Generated browser runtime
+assets/hls.min.js

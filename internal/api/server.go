@@ -51,6 +51,15 @@ type Server struct {
 	metricsMu      sync.RWMutex
 	componentStats map[string]func() map[string]interface{}
 	statsMu        sync.RWMutex
+	trustedProxies []*net.IPNet
+	rateLimit      int
+	rateMu         sync.Mutex
+	rateEntries    map[string]*rateEntry
+}
+
+type rateEntry struct {
+	windowStart time.Time
+	count       int
 }
 
 func NewServer(cfg *config.APIConfig, registry *core.StreamRegistry, m *metrics.Metrics, logger *zap.Logger) *Server {
@@ -93,6 +102,9 @@ func NewServer(cfg *config.APIConfig, registry *core.StreamRegistry, m *metrics.
 		metricsPath:    "/metrics",
 		routes:         make(map[string]struct{}),
 		componentStats: make(map[string]func() map[string]interface{}),
+		trustedProxies: parseTrustedProxies(cfg.TrustedProxies),
+		rateLimit:      cfg.RateLimitPerMinute,
+		rateEntries:    make(map[string]*rateEntry),
 	}
 	s.registerRoutes()
 	return s
@@ -369,7 +381,7 @@ func (s *Server) registerRoutes() {
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.corsMiddleware(s.loggingMiddleware(s.securityHeadersMiddleware(s.mux)))
+	return s.corsMiddleware(s.loggingMiddleware(s.securityHeadersMiddleware(s.rateLimitMiddleware(s.mux))))
 }
 
 func (s *Server) Start(addr string) error {
@@ -551,20 +563,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		s.methodNotAllowed(w)
 		return
 	}
-	s.writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status":        "healthy",
-		"version":       s.versionSnapshot(),
-		"uptime":        time.Since(s.startedAt).Round(time.Second).String(),
-		"api_base_path": s.basePath,
-		"metrics_path":  s.metricsPathSnapshot(),
-		"auth_enabled":  s.authManagerSnapshot() != nil,
-	})
-}
-
-func (s *Server) metricsPathSnapshot() string {
-	s.metricsMu.RLock()
-	defer s.metricsMu.RUnlock()
-	return s.metricsPath
+	s.writeJSON(w, http.StatusOK, map[string]string{"status": "healthy"})
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
@@ -712,9 +711,9 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	)
 	switch req.Action {
 	case "publish":
-		token, err = manager.GeneratePublishToken(req.StreamID, r.Header.Get("X-API-Key"), clientIP(r))
+		token, err = manager.GeneratePublishToken(req.StreamID, r.Header.Get("X-API-Key"), s.clientIP(r))
 	case "play":
-		token, err = manager.GeneratePlayToken(req.StreamID, clientIP(r))
+		token, err = manager.GeneratePlayToken(req.StreamID, s.clientIP(r))
 	default:
 		s.badRequest(w, "action must be publish or play")
 		return
@@ -812,12 +811,95 @@ func (s *Server) deleteStream(w http.ResponseWriter, id string) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func clientIP(r *http.Request) string {
+func directClientIP(r *http.Request) string {
 	remote := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(remote); err == nil {
 		return host
 	}
 	return remote
+}
+
+func parseTrustedProxies(values []string) []*net.IPNet {
+	result := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		if ip := net.ParseIP(value); ip != nil {
+			bits := 128
+			if ip.To4() != nil {
+				bits = 32
+			}
+			result = append(result, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+			continue
+		}
+		if _, network, err := net.ParseCIDR(value); err == nil {
+			result = append(result, network)
+		}
+	}
+	return result
+}
+
+func (s *Server) clientIP(r *http.Request) string {
+	remote := directClientIP(r)
+	ip := net.ParseIP(remote)
+	trusted := false
+	for _, network := range s.trustedProxies {
+		if ip != nil && network.Contains(ip) {
+			trusted = true
+			break
+		}
+	}
+	if !trusted {
+		return remote
+	}
+	if candidate := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); net.ParseIP(candidate) != nil {
+		return candidate
+	}
+	for _, candidate := range strings.Split(r.Header.Get("X-Forwarded-For"), ",") {
+		candidate = strings.TrimSpace(candidate)
+		if net.ParseIP(candidate) != nil {
+			return candidate
+		}
+	}
+	return remote
+}
+
+func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.rateLimit <= 0 || (r.URL.Path != s.basePath && !strings.HasPrefix(r.URL.Path, s.basePath+"/")) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		key := s.clientIP(r)
+		now := time.Now()
+		limited := false
+
+		s.rateMu.Lock()
+		entry := s.rateEntries[key]
+		if entry == nil || now.Sub(entry.windowStart) >= time.Minute {
+			entry = &rateEntry{windowStart: now}
+			s.rateEntries[key] = entry
+		}
+		if entry.count >= s.rateLimit {
+			limited = true
+		} else {
+			entry.count++
+		}
+		if len(s.rateEntries) > 4096 {
+			for candidate, value := range s.rateEntries {
+				if now.Sub(value.windowStart) >= 2*time.Minute {
+					delete(s.rateEntries, candidate)
+				}
+			}
+		}
+		s.rateMu.Unlock()
+
+		if limited {
+			w.Header().Set("Retry-After", "60")
+			s.writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "rate limit exceeded"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func decodeSingleJSON(decoder *json.Decoder, destination interface{}) error {
@@ -848,7 +930,7 @@ func (s *Server) authorizePlayback(w http.ResponseWriter, r *http.Request, strea
 		}
 	}
 	claims, err := manager.ValidateToken(tokenString)
-	if err != nil || !manager.CanPlayFromIP(claims, streamID, clientIP(r)) {
+	if err != nil || !manager.CanPlayFromIP(claims, streamID, s.clientIP(r)) {
 		s.unauthorized(w)
 		return false
 	}

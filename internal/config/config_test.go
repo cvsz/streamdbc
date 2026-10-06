@@ -240,3 +240,24 @@ func TestConfigRejectsUnboundedTranscoderResources(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigRejectsInvalidProxyAndRateLimit(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.API.TrustedProxies = []string{"not-a-proxy"}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "trusted_proxies") {
+		t.Fatalf("expected invalid trusted proxy error, got %v", err)
+	}
+
+	cfg = DefaultConfig()
+	cfg.API.RateLimitPerMinute = -1
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "rate_limit_per_minute") {
+		t.Fatalf("expected invalid rate limit error, got %v", err)
+	}
+
+	cfg = DefaultConfig()
+	cfg.WebRTC.Enable = true
+	cfg.WebRTC.CORSOrigins = nil
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "cors_origins") {
+		t.Fatalf("expected WebRTC CORS requirement error, got %v", err)
+	}
+}

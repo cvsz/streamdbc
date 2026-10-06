@@ -9,6 +9,8 @@ import android.os.Looper;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.Surface;
+import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.WindowManager;
 import android.widget.EditText;
@@ -25,7 +27,7 @@ import java.util.Arrays;
 import java.util.List;
 
 @UnstableApi
-public final class MainActivity extends Activity {
+public final class MainActivity extends Activity implements SurfaceHolder.Callback {
     private final List<StreamConfig> channels = new ArrayList<>();
     private SecureStreamStore store;
     private RtspPlaybackController playback;
@@ -37,6 +39,8 @@ public final class MainActivity extends Activity {
     private NdiReceiver ndiReceiver;
     private SurfaceView ndiSurface;
     private PlayerView playerView;
+    private String pendingNdiSource;
+    private boolean ndiMode;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -52,6 +56,7 @@ public final class MainActivity extends Activity {
 
         ndiSurface = new SurfaceView(this);
         ndiSurface.setVisibility(View.GONE);
+        ndiSurface.getHolder().addCallback(this);
         root.addView(ndiSurface, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
 
@@ -101,6 +106,8 @@ public final class MainActivity extends Activity {
 
     private void playCurrent() {
         if (channels.isEmpty()) return;
+        ndiMode = false;
+        pendingNdiSource = null;
         ndiReceiver.stop();
         ndiSurface.setVisibility(View.GONE);
         playerView.setVisibility(View.VISIBLE);
@@ -193,8 +200,23 @@ public final class MainActivity extends Activity {
         playback.release();
         playerView.setVisibility(View.GONE);
         ndiSurface.setVisibility(View.VISIBLE);
-        boolean started = ndiReceiver.start(sourceName, ndiSurface.getHolder().getSurface());
+        ndiMode = true;
+        pendingNdiSource = sourceName;
+        Surface surface = ndiSurface.getHolder().getSurface();
+        if (surface != null && surface.isValid()) {
+            startNdiOnSurface(sourceName, surface);
+        } else {
+            status.setText(R.string.ndi_discovering);
+        }
+    }
+
+    private void startNdiOnSurface(String sourceName, Surface surface) {
+        if (!ndiMode || sourceName == null || surface == null || !surface.isValid()) return;
+        ndiReceiver.stop();
+        boolean started = ndiReceiver.start(sourceName, surface);
         if (!started) {
+            ndiMode = false;
+            pendingNdiSource = null;
             ndiSurface.setVisibility(View.GONE);
             playerView.setVisibility(View.VISIBLE);
             showToast(getString(R.string.ndi_start_failed));
@@ -203,6 +225,25 @@ public final class MainActivity extends Activity {
         }
         title.setText(getString(R.string.ndi_live, sourceName));
         status.setText(getString(R.string.ndi_live, sourceName));
+    }
+
+    @Override
+    public void surfaceCreated(SurfaceHolder holder) {
+        if (ndiMode && pendingNdiSource != null) {
+            startNdiOnSurface(pendingNdiSource, holder.getSurface());
+        }
+    }
+
+    @Override
+    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+        // Native receiver adapts to source resolution changes.
+    }
+
+    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        if (ndiMode) {
+            ndiReceiver.stop();
+        }
     }
 
     private void showAddDialog() {
