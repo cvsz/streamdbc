@@ -9,11 +9,16 @@
     "build:win": "node build.js --windows",
     "dev": "electron . --enable-logging",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "vendor": "node scripts/vendor-hls.js",
+    "prestart": "npm run vendor",
+    "prepack": "npm run vendor",
+    "predist": "npm run vendor"
   },
   "dependencies": {
     "electron-updater": "^6.3.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "hls.js": "1.5.17"
   },
   "devDependencies": {
     "electron": "^44.4.1",
@@ -31,7 +36,8 @@
       "player.html",
       "player.js",
       "assets/**/*",
-      "locales/**/*"
+      "locales/**/*",
+      "scripts/**/*"
     ],
     "win": {
       "target": [
