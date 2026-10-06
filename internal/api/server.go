@@ -566,12 +566,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]string{"status": "healthy"})
 }
 
-func (s *Server) metricsPathSnapshot() string {
-	s.metricsMu.RLock()
-	defer s.metricsMu.RUnlock()
-	return s.metricsPath
-}
-
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		s.methodNotAllowed(w)
