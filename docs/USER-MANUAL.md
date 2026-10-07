@@ -1,7 +1,7 @@
 # STREMDBC User Manual
 
-**Version:** 0.6.0
-**Last Updated:** 2026-09-17
+**Version:** 1.4.0
+**Last Updated:** 2026-10-08
 
 ---
 
@@ -23,6 +23,8 @@
 14. [Troubleshooting](#troubleshooting)
 15. [Building](#building)
 16. [Docker](#docker)
+17. [Windows Single Control Panel](#17-windows-single-control-panel)
+18. [Samsung TV Fleet Control](#18-samsung-tv-fleet-control)
 
 ---
 
@@ -52,6 +54,8 @@ STREMDBC is a Go-based streaming management control plane. It provides:
 | Recorder, DVR, transcoder | Reusable managers; no media-source wiring |
 | Redis cluster | Node registration, heartbeat, discovery primitives |
 | PostgreSQL | Rejected until schema integration |
+| Windows Single Control Panel | v1.4.0 available; packages server runtime, FFmpeg and Samsung fleet controls |
+| Samsung UA40F5500 fleet control | SSDP discovery + AVTransport/RenderingControl; physical playback validation remains required |
 
 > **Important:** The default configuration keeps all media adapters disabled. Enable an adapter only after supplying the corresponding production media engine and integration.
 
@@ -1123,3 +1127,97 @@ curl http://localhost:8085/metrics
 # Check server logs
 tail -f /tmp/stremdbc.log
 ```
+
+
+---
+
+## 17. Windows Single Control Panel
+
+The Windows desktop application is the preferred operator surface for the
+Samsung deployment. Version 1.4.0 combines these operations in one UI:
+
+- StreamDBC server start/restart/stop and runtime status
+- bundled FFmpeg path/version/capability verification
+- Samsung media-gateway start/restart/stop
+- Windows Doctor, rebuild and USB staging tasks
+- LAN address detection
+- Cloudflare LAN-DNS synchronization
+- Samsung TV fleet discovery and control
+
+The installer contains `samsung-fleet.js`; no external Node package is needed
+for SSDP/UPnP control.
+
+Build the Windows installer and portable executable:
+
+```powershell
+cd client
+npm ci
+npm run build:win
+```
+
+The Desktop Client workflow verifies JavaScript syntax, npm audit, vendored
+HLS.js, the bundled StreamDBC server runtime, and the pinned FFmpeg runtime
+before uploading the Windows artifact.
+
+### Security boundary
+
+The renderer cannot provide arbitrary SOAP control endpoints. A TV must first
+be present in the in-memory SSDP-discovered fleet. UPnP description/control
+URLs are constrained to private IPv4 HTTP endpoints associated with the SSDP
+responder. This prevents the fleet UI from becoming a generic network request
+surface.
+
+See `SINGLE-CONTROL-PANEL.md` for operator details.
+
+## 18. Samsung TV Fleet Control
+
+The tested family is Samsung UA40F5500 / Y2013 (VDLinux). A single TV may
+advertise separate SSDP `LOCATION` documents for MediaRenderer,
+MainTVServer2, DIAL and remote-control services. StreamDBC merges those
+descriptions per IP before presenting one fleet entry.
+
+Primary service path:
+
+```text
+SSDP discovery
+  → MediaRenderer device description
+  → AVTransport controlURL
+  → SetAVTransportURI
+  → Play
+  → GetTransportInfo
+```
+
+RenderingControl provides volume and mute operations.
+
+The Control Panel currently exposes:
+
+- Discover TVs
+- Refresh state
+- Play URL per TV
+- Stop per TV
+- Set volume
+- Mute/unmute
+- Play All / Stop All
+- Mute All / Unmute All
+
+Endpoint numbers such as `/smp_46_`, `/smp_24_`, or `/smp_22_` are
+firmware/runtime details and must never be persisted as universal constants.
+
+### Runtime validation sequence
+
+Before calling a deployment production-ready:
+
+1. run discovery and confirm every intended TV is present;
+2. verify AVTransport and RenderingControl are discovered;
+3. run read-only state queries;
+4. verify `ConnectionManager:GetProtocolInfo` when choosing a new media
+   format;
+5. test a known-good HTTP MP4 baseline;
+6. test the intended live MPEG-TS/HLS path;
+7. verify `SetAVTransportURI + Play` and `GetTransportInfo` on each TV;
+8. test all-TVs fan-out;
+9. reboot TVs and confirm rediscovery;
+10. run Wi-Fi interruption and soak tests.
+
+`MainTVAgent2` is optional/fallback. The action can exist in SCPD while the
+firmware still returns UPnP 501 at runtime.
