@@ -71,13 +71,14 @@ const maxLogValueRunes = 512
 // Keep sanitization immediately before structured logging so static analysis can
 // prove that CR/LF and other record-separator controls cannot reach the sink.
 func logSafeValue(value string) string {
-	value = strings.NewReplacer(
-		"\r", "\\r",
-		"\n", "\\n",
-		"\t", "\\t",
-		"\u2028", "\\u2028",
-		"\u2029", "\\u2029",
-	).Replace(value)
+	// CodeQL's go/log-injection query recognizes strings.ReplaceAll as a
+	// sanitizer for CR/LF. Remove record separators rather than encoding them
+	// so untrusted input cannot create a second logical log entry.
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	value = strings.ReplaceAll(value, "\u2028", "")
+	value = strings.ReplaceAll(value, "\u2029", "")
+	value = strings.ReplaceAll(value, "\t", " ")
 	value = strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
 			return -1
