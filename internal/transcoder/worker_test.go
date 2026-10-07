@@ -15,7 +15,9 @@ import (
 
 func testTranscoder(t *testing.T) *Manager {
 	t.Helper()
-	if runtime.GOOS == "windows" { t.Skip("fake POSIX FFmpeg fixture is covered on Linux CI") }
+	if runtime.GOOS == "windows" {
+		t.Skip("fake POSIX FFmpeg fixture is covered on Linux CI")
+	}
 	ffmpeg := filepath.Join(t.TempDir(), "fake-ffmpeg")
 	if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\ncase \"$*\" in *-encoders*) exit 0;; esac\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\nprintf '#EXTM3U\\n' > \"$last\"\n"), 0o700); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
@@ -36,7 +38,9 @@ func testTranscoder(t *testing.T) *Manager {
 }
 
 func TestTranscoderFailsWhenFFmpegProducesNoOutput(t *testing.T) {
-	if runtime.GOOS == "windows" { t.Skip("/bin/true fixture is POSIX-only") }
+	if runtime.GOOS == "windows" {
+		t.Skip("/bin/true fixture is POSIX-only")
+	}
 	manager, err := NewManager(&config.TranscoderConfig{
 		Enable:       true,
 		WorkerCount:  1,
