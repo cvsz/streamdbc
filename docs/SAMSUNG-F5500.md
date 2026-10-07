@@ -104,7 +104,11 @@ Get-NetIPAddress -AddressFamily IPv4
 Test-NetConnection -ComputerName 127.0.0.1 -Port 8081
 ```
 
-The TV and PC must be on the same subnet. Confirm that the active network is
+The TV and PC must be on the same subnet. The preferred hostname is
+`ztv.zeaz.dev`, currently mapped to `192.168.1.100`. If the router or TV blocks
+a public DNS name resolving to an RFC1918 address, configure split DNS/local DNS
+for `ztv.zeaz.dev -> 192.168.1.100` or use the direct LAN-IP fallback.
+Confirm that the active network is
 Private and that the router has no client/AP isolation. If needed, run
 `Test-NetConnection -ComputerName <PC-LAN-IP> -Port 8081` from another Windows
 device on the same Wi-Fi network.
@@ -114,13 +118,13 @@ device on the same Wi-Fi network.
 On the TV, open its browser and enter the URL printed by the start script:
 
 ```text
-http://<PC-LAN-IP>:8081/tv
+http://ztv.zeaz.dev:8081/tv/
 ```
 
 The direct native HLS fallback is:
 
 ```text
-http://<PC-LAN-IP>:8081/tv/live/index.m3u8
+http://ztv.zeaz.dev:8081/tv/live/index.m3u8
 ```
 
 The basic page at `/tv/basic` contains only a video element and is useful when
@@ -134,7 +138,7 @@ The default /tv page is kiosk-style: video fills the viewport, browser controls
 are omitted, and playback starts automatically when firmware policy allows it.
 ENTER/PLAY/PAUSE/RED retries playback if autoplay is blocked or the HLS stream
 temporarily drops. A Samsung Legacy launcher app can navigate directly to
-http://<PC-LAN-IP>:8081/tv/ so no iframe or browser address bar is required.
+http://ztv.zeaz.dev:8081/tv/ so no iframe or browser address bar is required.
 
 ## 7. Stop, restart, and test
 
