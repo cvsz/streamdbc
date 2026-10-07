@@ -1,9 +1,13 @@
 [CmdletBinding()]
 param(
-    [string]$Destination = (Join-Path (Resolve-Path (Join-Path $PSScriptRoot "..\..\client")).ProviderPath "vendor\ffmpeg")
+    [string]$Destination = ""
 )
 
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrWhiteSpace($Destination)) {
+    $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).ProviderPath
+    $Destination = Join-Path $repoRoot "client\vendor\ffmpeg"
+}
 $tag = "autobuild-2026-10-05-13-07"
 $asset = "ffmpeg-n9.0.2-22-g46d8f462ee-win64-gpl-9.0.zip"
 $sha256 = "1385d57bd30c009fca25655f056680317dc9db3724cf082443bf8830223877cf"
@@ -11,9 +15,10 @@ $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$asset"
 
 $ffmpegExe = Join-Path $Destination "ffmpeg.exe"
 $ffprobeExe = Join-Path $Destination "ffprobe.exe"
-if ((Test-Path $ffmpegExe -PathType Leaf) -and (Test-Path $ffprobeExe -PathType Leaf)) {
-    Write-Host "Bundled FFmpeg already staged: $Destination" -ForegroundColor Green
-    exit 0
+# Always recreate staging from the pinned, hash-verified archive. Never trust
+# stale or locally replaced binaries left by a previous build.
+if (Test-Path -LiteralPath $Destination) {
+    Remove-Item -LiteralPath $Destination -Recurse -Force
 }
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("streamdbc-ffmpeg-" + [guid]::NewGuid().ToString("N"))
