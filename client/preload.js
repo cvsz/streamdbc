@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectWorkspace: () => ipcRenderer.invoke('select-workspace'),
   fetchSamsungStatus: (serverUrl) => ipcRenderer.invoke('fetch-samsung-status', serverUrl),
   getServerRuntimeStatus: () => ipcRenderer.invoke('get-server-runtime-status'),
+  getFFmpegInfo: () => ipcRenderer.invoke('get-ffmpeg-info'),
   serverRuntimeAction: (action) => ipcRenderer.invoke('server-runtime-action', action),
   openLocalDashboard: () => ipcRenderer.invoke('open-local-dashboard'),
   openLocalTV: () => ipcRenderer.invoke('open-local-tv'),

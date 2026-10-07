@@ -43,6 +43,21 @@ function Get-SamsungTVFFmpegPath {
         return (Resolve-Path -LiteralPath $Requested).Path
     }
 
+    # Installed Control Panel runtime: resources\server-runtime\scripts\windows
+    $runtimeRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+    $bundledRuntime = Join-Path $runtimeRoot "ffmpeg\ffmpeg.exe"
+    if (Test-Path -LiteralPath $bundledRuntime -PathType Leaf) {
+        return (Resolve-Path -LiteralPath $bundledRuntime).Path
+    }
+
+    # Repository/local package staging: client\vendor\ffmpeg
+    $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+    $repoBundled = Join-Path $repoRoot "client\vendor\ffmpeg\ffmpeg.exe"
+    if (Test-Path -LiteralPath $repoBundled -PathType Leaf) {
+        return (Resolve-Path -LiteralPath $repoBundled).Path
+    }
+
+    # Backward-compatible managed installation.
     $managedRoot = Join-Path $env:LOCALAPPDATA "StreamDBC\FFmpeg"
     if (Test-Path -LiteralPath $managedRoot -PathType Container) {
         $managed = Get-ChildItem -LiteralPath $managedRoot -Directory -ErrorAction SilentlyContinue |
@@ -53,6 +68,7 @@ function Get-SamsungTVFFmpegPath {
         if ($managed) { return $managed }
     }
 
+    # Final fallback only.
     $onPath = Get-Command -Name "ffmpeg" -ErrorAction SilentlyContinue
     if ($onPath) { return $onPath.Source }
     return $null

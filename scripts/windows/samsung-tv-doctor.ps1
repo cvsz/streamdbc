@@ -3,7 +3,8 @@ param(
     [int]$Port = 8081,
     [string]$FFmpegPath = "ffmpeg",
     [string]$OutputPath = (Join-Path $env:LOCALAPPDATA "StreamDBC\SamsungTV"),
-    [switch]$AllowPortInUse
+    [switch]$AllowPortInUse,
+    [switch]$RequireVMix
 )
 
 $script:Failures = 0
@@ -31,21 +32,34 @@ $networkProfile = Get-NetConnectionProfile -ErrorAction SilentlyContinue |
 Report-Check ($null -ne $networkProfile -and $networkProfile.NetworkCategory -eq "Private") "Private network" $(if ($networkProfile) { $networkProfile.NetworkCategory } else { "Set the active LAN connection to Private" })
 
 $ffmpegSource = Get-SamsungTVFFmpegPath -Requested $FFmpegPath
-Report-Check ($null -ne $ffmpegSource) "FFmpeg" $(if ($ffmpegSource) { $ffmpegSource } else { "Install FFmpeg with DirectShow and libx264, or pass -FFmpegPath" })
+Report-Check ($null -ne $ffmpegSource) "FFmpeg" $(if ($ffmpegSource) { $ffmpegSource } else { "Bundled/managed/system FFmpeg was not found" })
+if ($ffmpegSource) {
+    $ffmpegVersion = (& $ffmpegSource -version 2>&1 | Select-Object -First 1 | Out-String).Trim()
+    $encoders = (& $ffmpegSource -hide_banner -encoders 2>&1 | Out-String)
+    $muxers = (& $ffmpegSource -hide_banner -muxers 2>&1 | Out-String)
+    $protocols = (& $ffmpegSource -hide_banner -protocols 2>&1 | Out-String)
+    Report-Check (-not [string]::IsNullOrWhiteSpace($ffmpegVersion)) "FFmpeg version" $ffmpegVersion
+    Report-Check ($encoders -match "(?i)libx264") "H.264 encoder" "libx264"
+    Report-Check ($encoders -match "(?m)^\s*[A-Z\.]{6}\s+aac\s") "AAC encoder" "aac"
+    Report-Check ($muxers -match "(?m)^\s*[A-Z\.]{1,3}\s+hls\s") "HLS muxer" "hls"
+    Report-Check ($protocols -match "(?m)^\s*rtmp\s*$") "RTMP protocol" "rtmp"
+}
 $deviceOutput = ""
 if ($ffmpegSource) {
     $deviceOutput = (& $ffmpegSource -hide_banner -list_devices true -f dshow -i dummy 2>&1 | Out-String)
 }
 $vmixProcess = Get-Process -Name "vmix64", "vmix" -ErrorAction SilentlyContinue | Select-Object -First 1
-Report-Check ($null -ne $vmixProcess) "vMix running" $(if ($vmixProcess) { $vmixProcess.ProcessName } else { "Start vMix and enable External Output" })
-if (-not $ffmpegSource) {
-    # Without FFmpeg there is no device list to print; point at the FFmpeg
-    # check instead of showing an empty "detected devices" section.
-    Report-Check $false "vMix Video" "cannot enumerate DirectShow devices without FFmpeg; fix the FFmpeg check above, then rerun"
-    Report-Check $false "vMix Audio" "cannot enumerate DirectShow devices without FFmpeg; fix the FFmpeg check above, then rerun"
+if ($RequireVMix) {
+    Report-Check ($null -ne $vmixProcess) "vMix running" $(if ($vmixProcess) { $vmixProcess.ProcessName } else { "Start vMix and enable External Output" })
+    if (-not $ffmpegSource) {
+        Report-Check $false "vMix Video" "cannot enumerate DirectShow devices without FFmpeg; fix the FFmpeg check above, then rerun"
+        Report-Check $false "vMix Audio" "cannot enumerate DirectShow devices without FFmpeg; fix the FFmpeg check above, then rerun"
+    } else {
+        Report-Check ($deviceOutput -match "(?i)vMix Video") "vMix Video" $(if ($deviceOutput -match "(?i)vMix Video") { "DirectShow capture device detected" } else { "Not found; detected DirectShow devices:`n$deviceOutput" })
+        Report-Check ($deviceOutput -match "(?i)vMix Audio") "vMix Audio" $(if ($deviceOutput -match "(?i)vMix Audio") { "DirectShow capture device detected" } else { "Not found; detected DirectShow devices:`n$deviceOutput" })
+    }
 } else {
-    Report-Check ($deviceOutput -match "(?i)vMix Video") "vMix Video" $(if ($deviceOutput -match "(?i)vMix Video") { "DirectShow capture device detected" } else { "Not found; detected DirectShow devices:`n$deviceOutput" })
-    Report-Check ($deviceOutput -match "(?i)vMix Audio") "vMix Audio" $(if ($deviceOutput -match "(?i)vMix Audio") { "DirectShow capture device detected" } else { "Not found; detected DirectShow devices:`n$deviceOutput" })
+    Write-Host "INFO vMix/DirectShow checks skipped (remote RTMP server mode)." -ForegroundColor DarkCyan
 }
 
 $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1

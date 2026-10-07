@@ -15,6 +15,14 @@ try {
     $go = Get-Command go -ErrorAction SilentlyContinue
     if (-not $go) { throw "Go is not installed or not on PATH." }
 
+    Write-Host "Preparing verified bundled FFmpeg x64..." -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "prepare-bundled-ffmpeg.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "Bundled FFmpeg preparation failed." }
+    . (Join-Path $PSScriptRoot "samsung-tv-common.ps1")
+    $resolvedFFmpeg = Get-SamsungTVFFmpegPath -Requested "ffmpeg"
+    if (-not $resolvedFFmpeg) { throw "FFmpeg could not be resolved after preparation." }
+    $env:STREMDBC_FFMPEG_PATH = $resolvedFFmpeg
+
     if (-not $SkipTests) {
         Write-Host "Running Go tests..." -ForegroundColor Cyan
         & go test ./...

@@ -286,8 +286,10 @@ func TestSamsungF5500ExampleConfigLoads(t *testing.T) {
 	if !cfg.API.Enable || !cfg.Auth.Enable || !cfg.Auth.AllowAnonymous || !cfg.SamsungTV.Enable {
 		t.Fatalf("sample should enable only API, anonymous TV playback, and the Samsung gateway: api=%t auth=%t anonymous=%t samsung=%t", cfg.API.Enable, cfg.Auth.Enable, cfg.Auth.AllowAnonymous, cfg.SamsungTV.Enable)
 	}
-	if cfg.SamsungTV.OutputPath != filepath.Join(localAppData, "StreamDBC", "SamsungTV") {
-		t.Fatalf("sample output path did not expand LOCALAPPDATA: %q", cfg.SamsungTV.OutputPath)
+	wantOutput := filepath.Clean(filepath.Join(localAppData, "StreamDBC", "SamsungTV"))
+	gotOutput := filepath.Clean(filepath.FromSlash(cfg.SamsungTV.OutputPath))
+	if gotOutput != wantOutput {
+		t.Fatalf("sample output path did not expand LOCALAPPDATA: got %q want %q", gotOutput, wantOutput)
 	}
 	for name, enabled := range map[string]bool{
 		"hls": cfg.HLS.Enable, "llhls": cfg.LLHLS.Enable, "rtmp": cfg.RTMP.Enable,

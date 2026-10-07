@@ -421,6 +421,94 @@ function resolveServerRuntime() {
   ) || null;
 }
 
+
+function findOnPath(executable) {
+  const pathEntries = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  for (const dir of pathEntries) {
+    const candidate = path.join(dir, executable);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return '';
+}
+
+function resolveFFmpegRuntime() {
+  const candidates = [];
+  if (app.isPackaged) {
+    candidates.push({ source: 'bundled', path: path.join(process.resourcesPath, 'server-runtime', 'ffmpeg', 'ffmpeg.exe') });
+  }
+  const workspace = String(settings.workspacePath || '').trim();
+  if (workspace) {
+    candidates.push({ source: 'workspace-bundled', path: path.join(workspace, 'client', 'vendor', 'ffmpeg', 'ffmpeg.exe') });
+  }
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    const managedRoot = path.join(process.env.LOCALAPPDATA, 'StreamDBC', 'FFmpeg');
+    if (fs.existsSync(managedRoot)) {
+      const dirs = fs.readdirSync(managedRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name)
+        .sort()
+        .reverse();
+      for (const dir of dirs) {
+        candidates.push({ source: 'localappdata', path: path.join(managedRoot, dir, 'ffmpeg.exe') });
+      }
+    }
+  }
+  const onPath = findOnPath('ffmpeg.exe') || findOnPath('ffmpeg');
+  if (onPath) candidates.push({ source: 'system-path', path: onPath });
+  return candidates.find((candidate) => fs.existsSync(candidate.path)) || null;
+}
+
+function captureProcess(executable, args, timeoutMs = 10000) {
+  return new Promise((resolve) => {
+    const child = spawn(executable, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const limit = 256 * 1024;
+    child.stdout.on('data', (chunk) => { stdout = (stdout + chunk.toString()).slice(-limit); });
+    child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-limit); });
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch {}
+    }, timeoutMs);
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ ok: false, error: err.message, stdout, stderr });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ ok: code === 0, exitCode: code, stdout, stderr });
+    });
+  });
+}
+
+async function getFFmpegInfo() {
+  const resolved = resolveFFmpegRuntime();
+  if (!resolved) {
+    return { ok: false, source: '', path: '', version: '', h264: false, aac: false, hls: false, rtmp: false, error: 'FFmpeg not found.' };
+  }
+  const [versionRun, encodersRun, muxersRun, protocolsRun] = await Promise.all([
+    captureProcess(resolved.path, ['-version']),
+    captureProcess(resolved.path, ['-hide_banner', '-encoders']),
+    captureProcess(resolved.path, ['-hide_banner', '-muxers']),
+    captureProcess(resolved.path, ['-hide_banner', '-protocols'])
+  ]);
+  const versionText = (versionRun.stdout || versionRun.stderr || '').split(/\r?\n/)[0].trim();
+  const encoders = encodersRun.stdout + '\n' + encodersRun.stderr;
+  const muxers = muxersRun.stdout + '\n' + muxersRun.stderr;
+  const protocols = protocolsRun.stdout + '\n' + protocolsRun.stderr;
+  const result = {
+    ok: versionRun.ok && /libx264/i.test(encoders) && /\baac\b/i.test(encoders) && /\bhls\b/i.test(muxers) && /(^|\s)rtmp(\s|$)/im.test(protocols),
+    source: resolved.source,
+    path: resolved.path,
+    version: versionText,
+    h264: /libx264/i.test(encoders),
+    aac: /\baac\b/i.test(encoders),
+    hls: /\bhls\b/i.test(muxers),
+    rtmp: /(^|\s)rtmp(\s|$)/im.test(protocols)
+  };
+  if (!result.ok) result.error = 'FFmpeg is missing one or more required capabilities: libx264, AAC, HLS, RTMP.';
+  return result;
+}
+
 async function getServerRuntimeStatus() {
   const health = await requestJson('GET', settings.serverUrl, '/health');
   const runtime = resolveServerRuntime();
@@ -467,6 +555,8 @@ async function startServerRuntime() {
   }
 
   serverRuntimeLastError = '';
+  const ffmpeg = resolveFFmpegRuntime();
+  if (!ffmpeg) return { ok: false, error: 'FFmpeg was not found. Reinstall the Control Panel or run the FFmpeg preparation step.' };
   serverProcess = spawn(runtime.executable, ['-config', runtime.config], {
     cwd: runtime.cwd,
     windowsHide: true,
@@ -475,7 +565,9 @@ async function startServerRuntime() {
     env: {
       ...process.env,
       STREMDBC_JWT_SECRET: jwtSecret,
-      STREMDBC_API_KEY: runtimeApiKey
+      STREMDBC_API_KEY: runtimeApiKey,
+      STREMDBC_FFMPEG_PATH: ffmpeg.path,
+      PATH: `${path.dirname(ffmpeg.path)}${path.delimiter}${process.env.PATH || ''}`
     }
   });
   serverProcess.once('error', (err) => {
@@ -943,7 +1035,8 @@ async function runSamsungWorkspaceTask(task) {
     return { ok: false, error: 'Windows builder tasks are available only on Windows.' };
   }
   const workspace = String(settings.workspacePath || '').trim();
-  if (!workspace) return { ok: false, error: 'Select the StreamDBC workspace first.' };
+  const bundledRoot = app.isPackaged ? path.join(process.resourcesPath, 'server-runtime') : '';
+  if (!workspace && task !== 'doctor') return { ok: false, error: 'Select the StreamDBC workspace first.' };
 
   const allowed = {
     doctor: { file: 'samsung-tv-doctor.ps1', args: ['-Port', '8081'] },
@@ -956,22 +1049,39 @@ async function runSamsungWorkspaceTask(task) {
   const spec = allowed[task];
   if (!spec) return { ok: false, error: 'Unsupported builder task.' };
 
-  const scriptRoot = path.resolve(workspace, 'scripts', 'windows');
+  const taskRoot = workspace || bundledRoot;
+  const scriptRoot = path.resolve(taskRoot, 'scripts', 'windows');
   const scriptPath = path.resolve(scriptRoot, spec.file);
   if (!scriptPath.startsWith(scriptRoot + path.sep) || !fs.existsSync(scriptPath)) {
     return { ok: false, error: `Required script not found: ${scriptPath}` };
   }
+  const ffmpeg = resolveFFmpegRuntime();
+  const taskArgs = [...spec.args];
+  if (task === 'doctor' && ffmpeg) {
+    taskArgs.push('-FFmpegPath', ffmpeg.path, '-RequireVMix');
+  }
+
+  let taskJWTSecret = process.env.STREMDBC_JWT_SECRET || '';
+  if (task === 'doctor' && !taskJWTSecret) {
+    try { taskJWTSecret = getOrCreateRuntimeJWTSecret(); } catch {}
+  }
+  const taskAPIKey = process.env.STREMDBC_API_KEY || apiKey || '';
 
   return new Promise((resolve) => {
     const child = spawn('powershell.exe', [
       '-NoProfile',
       '-ExecutionPolicy', 'Bypass',
       '-File', scriptPath,
-      ...spec.args
+      ...taskArgs
     ], {
-      cwd: workspace,
+      cwd: taskRoot,
       windowsHide: true,
-      env: process.env
+      env: {
+        ...process.env,
+        ...(taskJWTSecret ? { STREMDBC_JWT_SECRET: taskJWTSecret } : {}),
+        ...(taskAPIKey ? { STREMDBC_API_KEY: taskAPIKey } : {}),
+        ...(ffmpeg ? { STREMDBC_FFMPEG_PATH: ffmpeg.path, PATH: `${path.dirname(ffmpeg.path)}${path.delimiter}${process.env.PATH || ''}` } : {})
+      }
     });
 
     let stdout = '';
@@ -1131,6 +1241,10 @@ ipcMain.handle('fetch-samsung-status', async (event, serverUrl) => {
 
 ipcMain.handle('get-server-runtime-status', async () => {
   return await getServerRuntimeStatus();
+});
+
+ipcMain.handle('get-ffmpeg-info', async () => {
+  return await getFFmpegInfo();
 });
 
 ipcMain.handle('server-runtime-action', async (event, action) => {
