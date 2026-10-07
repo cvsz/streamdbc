@@ -122,6 +122,9 @@ func TestManagerRestartsAfterUnexpectedExit(t *testing.T) {
 	if second == first {
 		t.Fatal("restart reused the exited process")
 	}
+	// The runner hands back the replacement process before the supervisor
+	// marks it LIVE; wait for the transition before asserting status.
+	waitForState(t, manager, StateLive)
 	status := manager.Status()
 	if status.State != StateLive || status.RestartCount != 1 || status.LastExit.IsZero() || status.LastError == "" {
 		t.Fatalf("restart status does not report the recovered exit: %+v", status)
@@ -252,4 +255,20 @@ func waitForState(t *testing.T, manager *Manager, state string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatalf("gateway state did not become %s; got %+v", state, manager.Status())
+}
+
+func TestTailBufferRetainsOnlyRecentDiagnostics(t *testing.T) {
+	buf := &tailBuffer{limit: 8}
+	if _, err := buf.Write([]byte("0123456789abcdef")); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "89abcdef" {
+		t.Fatalf("tail = %q", got)
+	}
+	if _, err := buf.Write([]byte("xy")); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "abcdefxy" {
+		t.Fatalf("tail = %q", got)
+	}
 }

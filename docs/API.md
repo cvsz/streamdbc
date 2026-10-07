@@ -164,6 +164,20 @@ SDP offers may use `application/sdp` or the JSON compatibility shape
 connections and detects publisher tracks, but does not forward RTP tracks to
 viewers. It must not be presented as a complete WebRTC media service.
 
+## Samsung TV endpoints
+
+- `GET /tv`, `GET /tv/`, `GET /tv/basic` — legacy-browser pages (ES5, no
+  JavaScript framework, native `<video>`).
+- `GET /tv/live/index.m3u8`, `GET /tv/live/segment_*.ts` — gateway HLS,
+  served only while the gateway reports live with a ready playlist;
+  `.m3u8` is `application/vnd.apple.mpegurl` (no cache), `.ts` is
+  `video/mp2t` (short cache). Unknown names and traversal return 404.
+- `GET /tv/status` (also `/api/v1/tv/status`) — read-only JSON status
+  without filesystem paths or device internals.
+- `GET /tv/ping` — plain-text `pong` connectivity probe, no auth.
+- `POST /api/v1/tv/start|stop|restart` — management-key gated mutations
+  with bounded, strict JSON bodies.
+
 ## Error format
 
 JSON API errors use one `error` field:

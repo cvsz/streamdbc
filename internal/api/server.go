@@ -301,6 +301,21 @@ func (s *Server) SetSamsungTV(manager *samsung.Manager, cfg config.SamsungTVConf
 	})
 	s.registerRoute(s.basePath+"/tv/status", statusHandler)
 	s.registerRoute("/tv/status", statusHandler)
+	// /tv/ping is a connectivity probe for the TV's weak scripting
+	// environment (plain-text, no auth, like /health).
+	pingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			s.methodNotAllowed(w)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte("pong"))
+		}
+	})
+	s.registerRoute(s.basePath+"/tv/ping", pingHandler)
+	s.registerRoute("/tv/ping", pingHandler)
 	for _, operation := range []string{"start", "stop", "restart"} {
 		action := operation
 		s.registerRoute(s.basePath+"/tv/"+action, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
