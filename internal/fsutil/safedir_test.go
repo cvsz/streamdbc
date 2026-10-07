@@ -3,6 +3,7 @@ package fsutil
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -31,7 +32,7 @@ func TestOpenWriteRemoveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o640 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o640 {
 		t.Fatalf("perm = %v", info.Mode().Perm())
 	}
 	if err := dir.RemoveFile("segment_0.ts"); err != nil {
