@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([int]$Port = 8080)
+param([int]$Port = 8081)
 
 if ([string]::IsNullOrWhiteSpace($env:STREMDBC_API_KEY)) {
     throw "Set STREMDBC_API_KEY before stopping the authenticated Samsung TV gateway."
