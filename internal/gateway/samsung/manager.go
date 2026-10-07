@@ -135,42 +135,58 @@ func NewManager(cfg *config.SamsungTVConfig, logger *zap.Logger) (*Manager, erro
 // fallback keeps the Windows one-click flow working on hosts where FFmpeg was
 // installed beside StreamDBC instead of onto the system PATH.
 func resolveFFmpeg(configured string) string {
-	if resolved, err := exec.LookPath(configured); err == nil {
-		return resolved
-	}
-	if filepath.IsAbs(configured) {
-		return ""
-	}
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" {
-		return ""
-	}
-	managedRoot := filepath.Join(localAppData, "StreamDBC", "FFmpeg")
-	entries, err := os.ReadDir(managedRoot)
-	if err != nil {
-		return ""
-	}
-	names := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			names = append(names, entry.Name())
+	configured = strings.TrimSpace(configured)
+	if configured != "" && configured != "ffmpeg" && configured != "ffmpeg.exe" {
+		if resolved, err := exec.LookPath(configured); err == nil {
+			return resolved
+		}
+		if filepath.IsAbs(configured) {
+			return ""
 		}
 	}
-	// Newest managed version wins, so the directory listing is sorted by
-	// numeric path segments (10.x must sort above 9.x).
-	sort.Slice(names, func(i, j int) bool { return compareVersionDirs(names[i], names[j]) > 0 })
-	candidates := []string{"ffmpeg.exe", "ffmpeg"}
-	for _, name := range names {
-		for _, candidate := range candidates {
-			path := filepath.Join(managedRoot, name, candidate)
-			// #nosec G703 -- name is from ReadDir, candidate is hardcoded; no user taint
-			if info, err := os.Stat(path); err == nil && !info.IsDir() {
-				return path
+
+	// The Windows Control Panel sets this to its bundled runtime before
+	// starting the server, making the bundled verified build the first choice.
+	if bundled := strings.TrimSpace(os.Getenv("STREMDBC_FFMPEG_PATH")); bundled != "" {
+		if info, err := os.Stat(bundled); err == nil && !info.IsDir() {
+			return bundled
+		}
+	}
+
+	localAppData := os.Getenv("LOCALAPPDATA")
+	if localAppData != "" {
+		managedRoot := filepath.Join(localAppData, "StreamDBC", "FFmpeg")
+		entries, err := os.ReadDir(managedRoot)
+		if err == nil {
+			names := make([]string, 0, len(entries))
+			for _, entry := range entries {
+				if entry.IsDir() {
+					names = append(names, entry.Name())
+				}
+			}
+			sort.Slice(names, func(i, j int) bool { return compareVersionDirs(names[i], names[j]) > 0 })
+			for _, name := range names {
+				for _, candidate := range []string{"ffmpeg.exe", "ffmpeg"} {
+					candidatePath := filepath.Join(managedRoot, name, candidate)
+					if info, err := os.Stat(candidatePath); err == nil && !info.IsDir() {
+						return candidatePath
+					}
+				}
 			}
 		}
 	}
+
+	// System PATH is intentionally the final fallback.
+	for _, candidate := range []string{configured, "ffmpeg.exe", "ffmpeg"} {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		if resolved, err := exec.LookPath(candidate); err == nil {
+			return resolved
+		}
+	}
 	return ""
-}
+
 
 // compareVersionDirs compares directory names as dot-separated numeric
 // versions, falling back to string comparison for non-numeric segments.
