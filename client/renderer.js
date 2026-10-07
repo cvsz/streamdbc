@@ -28,6 +28,12 @@ function applySettings() {
   $('apiKey').placeholder = settings.hasApiKey ? 'Stored securely — enter to replace' : 'Your API key';
   $('notifications').checked = settings.notifications !== false;
   $('minimizeToTray').checked = settings.minimizeToTray !== false;
+  if ($('cloudflareHostname')) $('cloudflareHostname').value = settings.cloudflareHostname || 'ztv.zeaz.dev';
+  if ($('cloudflareToken')) {
+    $('cloudflareToken').value = '';
+    $('cloudflareToken').placeholder = settings.hasCloudflareToken ? 'Stored securely — enter to replace' : 'Cloudflare API token';
+  }
+  if ($('cloudflareAutoUpdate')) $('cloudflareAutoUpdate').checked = settings.cloudflareAutoUpdate === true;
   if ($('workspacePath')) $('workspacePath').textContent = settings.workspacePath || 'Not selected';
 }
 
@@ -263,6 +269,9 @@ async function saveSettings() {
   const newSettings = {
     serverUrl: $('serverUrl').value.trim(),
     apiKey: $('apiKey').value.trim(),
+    cloudflareHostname: $('cloudflareHostname')?.value.trim() || 'ztv.zeaz.dev',
+    cloudflareToken: $('cloudflareToken')?.value.trim() || '',
+    cloudflareAutoUpdate: $('cloudflareAutoUpdate')?.checked === true,
     notifications: $('notifications').checked,
     minimizeToTray: $('minimizeToTray').checked
   };
@@ -317,6 +326,26 @@ async function refreshSamsungStatus() {
   $('tvState').textContent = String(body.state || 'unknown').toUpperCase();
   $('tvPlaylist').textContent = body.playlist_ready ? 'READY' : 'WAIT';
   $('tvProfile').textContent = body.profile || '—';
+}
+
+async function refreshLanAndDNSStatus() {
+  const lan = await API.getLanIP();
+  if ($('lanAddress')) $('lanAddress').textContent = lan?.ok ? lan.address : 'Unavailable';
+  if ($('lanInterface')) $('lanInterface').textContent = lan?.ok ? lan.name : '—';
+  if ($('lanTvUrl')) $('lanTvUrl').textContent = lan?.ok ? lan.tvUrl : '—';
+}
+
+async function updateCloudflareDNS() {
+  const output = $('builderOutput');
+  output.textContent = 'Updating Cloudflare DNS from local LAN address...\n';
+  const result = await API.updateCloudflareDNS();
+  output.textContent += JSON.stringify(result, null, 2);
+  if (result?.ok) {
+    showToast(result.unchanged ? 'Cloudflare DNS already matches LAN IP' : `Cloudflare DNS updated: ${result.hostname} → ${result.address}`, 'success');
+  } else {
+    showToast(`Cloudflare DNS update failed: ${result?.error || 'unknown error'}`, 'error');
+  }
+  await refreshLanAndDNSStatus();
 }
 
 async function refreshServerRuntimeStatus() {
@@ -410,6 +439,7 @@ function init() {
     refreshInterval = setInterval(refreshData, 5000);
     refreshSamsungStatus();
     refreshServerRuntimeStatus();
+    refreshLanAndDNSStatus();
   });
 
   $('refreshBtn').addEventListener('click', refreshData);
@@ -465,6 +495,8 @@ function init() {
   });
   $('openLocalDashboardBtn').addEventListener('click', () => API.openLocalDashboard());
   $('openLocalTVBtn').addEventListener('click', () => API.openLocalTV());
+  $('updateCloudflareDnsBtn').addEventListener('click', updateCloudflareDNS);
+  $('refreshLanBtn').addEventListener('click', refreshLanAndDNSStatus);
   $('selectWorkspaceBtn').addEventListener('click', selectWorkspace);
   $('clearBuilderOutputBtn').addEventListener('click', () => { $('builderOutput').textContent = 'Ready.'; });
   document.querySelectorAll('[data-tv-action]').forEach(btn => {
