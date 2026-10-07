@@ -67,6 +67,7 @@ jobs:
         run: |
           node --check main.js
           node --check preload.js
+          node --check samsung-fleet.js
           node --check renderer.js
           node --check player.js
           node --check build.js
@@ -116,6 +117,7 @@ jobs:
         run: |
           node --check main.js
           node --check preload.js
+          node --check samsung-fleet.js
           node --check renderer.js
           node --check player.js
           node --check build.js
