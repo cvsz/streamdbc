@@ -121,14 +121,32 @@ authorization.
 
 When configured by the executable, the HTTP plane serves:
 
-- `/dashboard/` — zero-build management UI
+- `/dashboard/` — zero-build management UI (requires `X-API-Key` when auth is
+  configured; open only when no auth manager is set, e.g. local development)
 - `/player/{streamID}` — built-in player
 - `/hls/{streamID}/...` — files written by the HLS library component
 - `/llhls/{streamID}/...` — files written by the LL-HLS library component
 
 Static files are path-checked, and playback paths require a play token when
-anonymous playback is disabled. The executable does not automatically connect
-an ingest adapter to these writers; an empty directory is not a live stream.
+anonymous playback is disabled. Segment, part, and playlist writes go through
+fd-pinned stream directories on Linux (`O_NOFOLLOW` + `openat`/`renameat`/
+`unlinkat`), so a symlink swapped in after stream creation cannot redirect
+writes, cleanups, or removals outside the output root. The executable does
+not automatically connect an ingest adapter to these writers; an empty
+directory is not a live stream.
+
+## Protocol control authentication
+
+- RTMP ingest requires a publish token (`...?token=` stream key suffix);
+  RTMP output performs the RTMP handshake and requires a valid play token in
+  `connect` (`tcUrl` query) or `play` before a session reaches `playing`.
+  Unauthenticated RTMP output connections are closed.
+- RTSP `SETUP`/`ANNOUNCE`, SRT (`streamid=`), WHIP, and WHEP (`POST
+  /whep/{streamID}`) all enforce the same publish/play token rules; the WHEP
+  playback endpoint additionally requires the stream to be live.
+- Mutating HTTP methods (`POST`/`PUT`/`PATCH`/`DELETE`) are audit-logged at
+  Info with method, path (never the query string, so `?token=` values cannot
+  leak into logs), status code, and client IP. Reads stay at Debug.
 
 ## WebRTC control endpoints
 

@@ -138,3 +138,44 @@ func TestLLHLSStopRemovesStaleOutput(t *testing.T) {
 		t.Fatalf("stale LL-HLS output still exists, err=%v", err)
 	}
 }
+
+func TestLLHLSRemoveStreamFailsClosedOnSymlinkSwappedDirectory(t *testing.T) {
+	cfg := &config.LLHLSConfig{Enable: true, Path: t.TempDir(), SegmentDuration: 2 * time.Second, PartDuration: time.Second, PlaylistSize: 2}
+	manager, err := NewManager(cfg, nil, zap.NewNop())
+	if err != nil {
+		t.Fatalf("new LL-HLS manager: %v", err)
+	}
+	if err := manager.CreateStream("demo"); err != nil {
+		t.Fatalf("create stream: %v", err)
+	}
+	if err := manager.AddSegment("demo", []byte{0, 1, 2}); err != nil {
+		t.Fatalf("add segment: %v", err)
+	}
+	stream, ok := manager.GetStream("demo")
+	if !ok {
+		t.Fatal("stream should exist")
+	}
+	_ = stream
+	streamPath := filepath.Join(cfg.Path, "demo")
+	outside := t.TempDir()
+	canary := filepath.Join(outside, "canary.txt")
+	if err := os.WriteFile(canary, []byte("keep"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(streamPath, "segment_1.ts")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(streamPath, "index.m3u8")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(streamPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, streamPath); err != nil {
+		t.Fatal(err)
+	}
+	_ = manager.RemoveStream("demo")
+	if _, err := os.Stat(canary); err != nil {
+		t.Fatalf("outside file removed through swapped symlink: %v", err)
+	}
+}

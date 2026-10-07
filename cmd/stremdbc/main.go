@@ -180,6 +180,7 @@ func run() (runErr error) {
 
 	if cfg.RTMP.Enable {
 		rtmpServer = rtmpingest.NewServer(&cfg.RTMP, registry, logger)
+		rtmpServer.SetAuthManager(authManager)
 		if err := rtmpServer.Start(ctx); err != nil {
 			return fmt.Errorf("start RTMP server: %w", err)
 		}
@@ -187,6 +188,7 @@ func run() (runErr error) {
 
 	if cfg.RTSP.Enable {
 		rtspServer = rtspingest.NewServer(&cfg.RTSP, registry, logger)
+		rtspServer.SetAuthManager(authManager)
 		if err := rtspServer.Start(ctx); err != nil {
 			return fmt.Errorf("start RTSP server: %w", err)
 		}
@@ -194,6 +196,7 @@ func run() (runErr error) {
 
 	if cfg.SRT.Enable {
 		srtServer = srtingest.NewServer(&cfg.SRT, registry, logger)
+		srtServer.SetAuthManager(authManager)
 		if err := srtServer.Start(ctx); err != nil {
 			return fmt.Errorf("start SRT server: %w", err)
 		}
@@ -212,6 +215,7 @@ func run() (runErr error) {
 
 	if cfg.RTMPOutput.Enable {
 		rtmpOutputServer = rtmpoutput.NewServer(&cfg.RTMPOutput, registry, logger)
+		rtmpOutputServer.SetAuthManager(authManager)
 		if err := rtmpOutputServer.Start(ctx); err != nil {
 			return fmt.Errorf("start RTMP output server: %w", err)
 		}
@@ -219,6 +223,7 @@ func run() (runErr error) {
 
 	if cfg.RTSPOutput.Enable {
 		rtspOutputServer = rtspoutput.NewServer(&cfg.RTSPOutput, registry, logger)
+		rtspOutputServer.SetAuthManager(authManager)
 		if err := rtspOutputServer.Start(ctx); err != nil {
 			return fmt.Errorf("start RTSP output server: %w", err)
 		}
@@ -226,6 +231,7 @@ func run() (runErr error) {
 
 	if cfg.SRTOutput.Enable {
 		srtOutputServer = srtoutput.NewServer(&cfg.SRTOutput, registry, logger)
+		srtOutputServer.SetAuthManager(authManager)
 		if err := srtOutputServer.Start(ctx); err != nil {
 			return fmt.Errorf("start SRT output server: %w", err)
 		}

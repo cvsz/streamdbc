@@ -28,6 +28,9 @@ auth:
   jwt_expiry: "24h"
   api_keys:
     - "${STREMDBC_API_KEY}"
+  # The Samsung TV browser cannot present credentials, so the gateway forces
+  # anonymous playback on. Keep this profile on a trusted network segment:
+  # mutations and /dashboard still require X-API-Key.
   allow_anonymous: true
 
 samsung_tv:

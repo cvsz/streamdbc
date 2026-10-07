@@ -132,3 +132,37 @@ func TestHLSStopRemovesStaleOutput(t *testing.T) {
 func itoa(value int) string {
 	return strconv.Itoa(value)
 }
+
+func TestHLSStopFailsClosedOnSymlinkSwappedDirectory(t *testing.T) {
+	manager, cfg := newTestManager(t)
+	streamPath, err := manager.Start("demo")
+	if err != nil {
+		t.Fatalf("start stream: %v", err)
+	}
+	if err := manager.WriteSegment("demo", 0, []byte{0, 1, 2}); err != nil {
+		t.Fatalf("write segment: %v", err)
+	}
+	outside := t.TempDir()
+	canary := filepath.Join(outside, "canary.txt")
+	if err := os.WriteFile(canary, []byte("keep"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// Swap the validated directory for a symlink after Start.
+	if err := os.Remove(filepath.Join(streamPath, "segment_0.ts")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(streamPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, streamPath); err != nil {
+		t.Fatal(err)
+	}
+	_ = manager.Stop("demo")
+	if _, err := os.Stat(canary); err != nil {
+		t.Fatalf("outside file removed through swapped symlink: %v", err)
+	}
+	// The manager root itself must be untouched.
+	if _, err := os.Stat(cfg.Path); err != nil {
+		t.Fatalf("output root missing: %v", err)
+	}
+}

@@ -180,3 +180,14 @@ following before claiming device compatibility:
 
 Until those observations are recorded, Samsung UA40F5500 playback is an
 unverified physical-device gate.
+
+## Authentication note
+
+The Samsung F5500 browser client cannot send JWT credentials, so StreamDBC
+forces `auth.allow_anonymous: true` whenever the Samsung TV gateway is
+enabled. That means playback endpoints (HLS/LL-HLS static routes and
+play tokens) accept anonymous viewers. Any deployment of the F5500 profile
+should therefore be confined to a trusted network segment, and mutations
+(`/tv/start`, `/tv/stop`, `/tv/restart`, stream management) remain protected
+by the management API key / JWT. Ingest publish and output play endpoints
+still require valid tokens because they are separate authenticated surfaces.

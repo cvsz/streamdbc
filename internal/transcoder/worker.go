@@ -211,6 +211,7 @@ func (m *Manager) Stop() error {
 		m.cancelQueuedJobs()
 		return nil
 	case <-time.After(15 * time.Second):
+		m.cancelQueuedJobs()
 		return fmt.Errorf("timeout waiting for transcoder workers to stop")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cvsz/stremdbc/internal/auth"
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
 	"go.uber.org/zap"
@@ -36,6 +37,23 @@ type Server struct {
 	stopping  bool
 	streams   map[string]*StreamConnection
 	acceptWG  sync.WaitGroup
+	lastSweep time.Time
+	authMu    sync.RWMutex
+	auth      *auth.Manager
+}
+
+// SetAuthManager configures optional publish-token validation. When nil,
+// stream metadata is accepted without a token (legacy behavior).
+func (s *Server) SetAuthManager(manager *auth.Manager) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.auth = manager
+}
+
+func (s *Server) authSnapshot() *auth.Manager {
+	s.authMu.RLock()
+	defer s.authMu.RUnlock()
+	return s.auth
 }
 
 // StreamConnection represents validated stream metadata observed by the
@@ -180,7 +198,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, addr *net.UDPAdd
 	if addr == nil {
 		return
 	}
-	streamID := s.extractStreamID(data)
+	streamID := s.extractStreamID(data, addr)
 	if streamID == "" {
 		return
 	}
@@ -190,9 +208,12 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, addr *net.UDPAdd
 		return
 	}
 	now := time.Now().UTC()
-	for id, candidate := range s.streams {
-		if !candidate.LastSeen.IsZero() && now.Sub(candidate.LastSeen) > metadataTTL {
-			delete(s.streams, id)
+	if now.Sub(s.lastSweep) > metadataTTL/4 {
+		s.lastSweep = now
+		for id, candidate := range s.streams {
+			if !candidate.LastSeen.IsZero() && now.Sub(candidate.LastSeen) > metadataTTL {
+				delete(s.streams, id)
+			}
 		}
 	}
 	stream, exists := s.streams[streamID]
@@ -211,7 +232,7 @@ func (s *Server) handlePacket(ctx context.Context, data []byte, addr *net.UDPAdd
 	s.mu.Unlock()
 }
 
-func (s *Server) extractStreamID(data []byte) string {
+func (s *Server) extractStreamID(data []byte, addr *net.UDPAddr) string {
 	value := string(data)
 	if !strings.HasPrefix(value, "streamid=") {
 		return ""
@@ -226,10 +247,22 @@ func (s *Server) extractStreamID(data []byte) string {
 		return ""
 	}
 	decoded, err := url.QueryUnescape(remainder[:end])
-	if err != nil || core.ValidateStreamID(decoded) != nil {
+	if err != nil {
 		return ""
 	}
-	return decoded
+	streamID, token := auth.SplitStreamToken(decoded)
+	if err := core.ValidateStreamID(streamID); err != nil {
+		return ""
+	}
+	ip := ""
+	if addr != nil && addr.IP != nil {
+		ip = addr.IP.String()
+	}
+	if manager := s.authSnapshot(); manager != nil && !auth.Authorize(manager, token, "publish", streamID, ip) {
+		s.logger.Warn("rejected SRT publish token", zap.String("stream_id", streamID))
+		return ""
+	}
+	return streamID
 }
 
 func (s *Server) GetStreamCount() int {

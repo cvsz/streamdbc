@@ -98,10 +98,10 @@ recorder:
 
 auth:
   enable: false
-  jwt_secret: "gBjw2T7zrSqVBb7nsh9HJ9PD/vD74ySl1/u3YdtkIy/cI5Eq/kfjbyqjimtA36jr"
+  jwt_secret: "${STREMDBC_JWT_SECRET}"
   jwt_expiry: "24h"
   api_keys:
-    - "ogggLnRIcDaaAPiT75SAuMciMcAtSN9Ztptt3bti6oYD/mSs"
+    - "${STREMDBC_API_KEY}"
   allow_anonymous: true
 
 redis:

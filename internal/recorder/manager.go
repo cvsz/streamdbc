@@ -26,6 +26,12 @@ const (
 	stateFailed    = "failed"
 	stateCancelled = "cancelled"
 	maxFFmpegLog   = 64 * 1024
+
+	maxActiveRecordings = 64
+
+	// maxRecordingHistory caps how many superseded (finished) per-stream
+	// recordings are retained in memory for post-mortem inspection.
+	maxRecordingHistory = 128
 )
 
 var (
@@ -40,11 +46,26 @@ type Manager struct {
 	ffmpegPath string
 	logger     *zap.Logger
 	recordings map[string]*Recording
-	mu         sync.RWMutex
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	stopped    bool
+	// history holds superseded per-stream recordings (capped at
+	// maxRecordingHistory) so a finished recording is not lost when a new
+	// recording for the same stream starts.
+	history []*Recording
+	mu      sync.RWMutex
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	stopped bool
+}
+
+// addHistoryLocked archives a superseded recording. Caller must hold m.mu.
+func (m *Manager) addHistoryLocked(rec *Recording) {
+	if rec == nil || isActive(rec.State) {
+		return
+	}
+	m.history = append(m.history, recordingSnapshot(rec))
+	if len(m.history) > maxRecordingHistory {
+		m.history = append([]*Recording(nil), m.history[len(m.history)-maxRecordingHistory:]...)
+	}
 }
 
 // Recording represents a recording and is returned as a snapshot.
@@ -121,6 +142,16 @@ func (m *Manager) StartRecording(streamID, inputURL string, onComplete func(stri
 		m.mu.Unlock()
 		return fmt.Errorf("recording already in progress for stream %s", streamID)
 	}
+	active := 0
+	for _, rec := range m.recordings {
+		if isActive(rec.State) {
+			active++
+		}
+	}
+	if active >= maxActiveRecordings {
+		m.mu.Unlock()
+		return fmt.Errorf("recording limit of %d reached", maxActiveRecordings)
+	}
 	now := time.Now().UTC()
 	filename := fmt.Sprintf("%s_%s.mp4", streamID, now.Format("20060102_150405.000000000"))
 	outputPath := filepath.Join(m.config.Path, filename)
@@ -143,6 +174,9 @@ func (m *Manager) StartRecording(streamID, inputURL string, onComplete func(stri
 	stderr := &limitedBuffer{limit: maxFFmpegLog}
 	cmd.Stderr = stderr
 	rec.cmd = cmd
+	if replaced, exists := m.recordings[streamID]; exists && replaced != rec {
+		m.addHistoryLocked(replaced)
+	}
 	m.recordings[streamID] = rec
 	m.wg.Add(1)
 	m.mu.Unlock()
@@ -277,6 +311,16 @@ func (m *Manager) StopRecording(streamID string) error {
 		if err := process.Signal(os.Interrupt); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			return fmt.Errorf("interrupt recording: %w", err)
 		}
+		go func() {
+			time.Sleep(10 * time.Second)
+			m.mu.RLock()
+			current, exists := m.recordings[streamID]
+			active := exists && current == rec && isActive(current.State)
+			m.mu.RUnlock()
+			if active && process != nil {
+				_ = process.Kill()
+			}
+		}()
 	}
 	return nil
 }
@@ -317,6 +361,9 @@ func (m *Manager) Stop(ctx context.Context) error {
 	case <-done:
 		return nil
 	case <-ctx.Done():
+		for _, process := range active {
+			_ = process.Kill()
+		}
 		return ctx.Err()
 	}
 }
@@ -341,11 +388,15 @@ func (m *Manager) GetRecordingCount() int {
 	return len(m.recordings)
 }
 
-// ListRecordings returns deterministic snapshots of all tracked recordings.
+// ListRecordings returns deterministic snapshots of all tracked recordings,
+// including archived history of superseded per-stream recordings.
 func (m *Manager) ListRecordings() []*Recording {
 	m.mu.RLock()
-	result := make([]*Recording, 0, len(m.recordings))
+	result := make([]*Recording, 0, len(m.recordings)+len(m.history))
 	for _, rec := range m.recordings {
+		result = append(result, recordingSnapshot(rec))
+	}
+	for _, rec := range m.history {
 		result = append(result, recordingSnapshot(rec))
 	}
 	m.mu.RUnlock()
@@ -369,8 +420,12 @@ func (m *Manager) GetStats() map[string]interface{} {
 		}
 		totalSize += rec.Size
 	}
+	for _, rec := range m.history {
+		totalDuration += rec.Duration
+		totalSize += rec.Size
+	}
 	outputPath := m.config.Path
-	totalRecordings := len(m.recordings)
+	totalRecordings := len(m.recordings) + len(m.history)
 	m.mu.RUnlock()
 	return map[string]interface{}{
 		"active_recordings": activeCount,

@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cvsz/stremdbc/internal/auth"
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
 	"go.uber.org/zap"
@@ -37,6 +38,23 @@ type Server struct {
 	stopping  bool
 	sessions  map[string]*Session
 	acceptWG  sync.WaitGroup
+	lastSweep time.Time
+	authMu    sync.RWMutex
+	auth      *auth.Manager
+}
+
+// SetAuthManager configures optional play-token validation. When nil,
+// consumer metadata is accepted without a token (legacy behavior).
+func (s *Server) SetAuthManager(manager *auth.Manager) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.auth = manager
+}
+
+func (s *Server) authSnapshot() *auth.Manager {
+	s.authMu.RLock()
+	defer s.authMu.RUnlock()
+	return s.auth
 }
 
 type Session struct {
@@ -172,7 +190,7 @@ func (s *Server) handlePacket(data []byte, addr *net.UDPAddr) {
 	if addr == nil {
 		return
 	}
-	streamID := s.extractStreamID(data)
+	streamID := s.extractStreamID(data, addr)
 	if streamID == "" {
 		return
 	}
@@ -182,9 +200,12 @@ func (s *Server) handlePacket(data []byte, addr *net.UDPAddr) {
 		return
 	}
 	now := time.Now().UTC()
-	for id, candidate := range s.sessions {
-		if !candidate.LastSeen.IsZero() && now.Sub(candidate.LastSeen) > outputSessionTTL {
-			delete(s.sessions, id)
+	if now.Sub(s.lastSweep) > outputSessionTTL/4 {
+		s.lastSweep = now
+		for id, candidate := range s.sessions {
+			if !candidate.LastSeen.IsZero() && now.Sub(candidate.LastSeen) > outputSessionTTL {
+				delete(s.sessions, id)
+			}
 		}
 	}
 	session, exists := s.sessions[streamID]
@@ -202,7 +223,7 @@ func (s *Server) handlePacket(data []byte, addr *net.UDPAddr) {
 	s.mu.Unlock()
 }
 
-func (s *Server) extractStreamID(data []byte) string {
+func (s *Server) extractStreamID(data []byte, addr *net.UDPAddr) string {
 	value := string(data)
 	if !strings.HasPrefix(value, "streamid=") {
 		return ""
@@ -216,10 +237,22 @@ func (s *Server) extractStreamID(data []byte) string {
 		return ""
 	}
 	decoded, err := url.QueryUnescape(remainder[:end])
-	if err != nil || core.ValidateStreamID(decoded) != nil {
+	if err != nil {
 		return ""
 	}
-	return decoded
+	streamID, token := auth.SplitStreamToken(decoded)
+	if core.ValidateStreamID(streamID) != nil {
+		return ""
+	}
+	ip := ""
+	if addr != nil && addr.IP != nil {
+		ip = addr.IP.String()
+	}
+	if manager := s.authSnapshot(); manager != nil && !auth.Authorize(manager, token, "play", streamID, ip) {
+		s.logger.Warn("rejected SRT play token", zap.String("stream_id", streamID))
+		return ""
+	}
+	return streamID
 }
 
 func (s *Server) GetSessionCount() int {

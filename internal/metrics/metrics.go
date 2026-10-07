@@ -149,7 +149,10 @@ func (m *Metrics) RecordError() {
 	m.errorsTotal.Inc()
 }
 
-// SetCurrentState updates gauges that represent the current registry state.
+// SetCurrentState overwrites the authoritative live-stream gauge. Callers
+// that also use RecordStreamLive/RecordStreamOffline should reconcile via
+// SetCurrentState periodically; the event counters are synthesized from the
+// gauge so increments never diverge the exported value.
 func (m *Metrics) SetCurrentState(liveStreams, viewers int) {
 	if liveStreams < 0 {
 		liveStreams = 0

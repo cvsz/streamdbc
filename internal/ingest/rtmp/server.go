@@ -14,8 +14,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cvsz/stremdbc/internal/auth"
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
+	"github.com/cvsz/stremdbc/internal/rtmpwire"
 	"go.uber.org/zap"
 )
 
@@ -30,6 +32,7 @@ var (
 	ErrStreamKeyMissing = errors.New("RTMP publish stream key is missing")
 	ErrUnsupportedMedia = errors.New("RTMP media forwarding is not configured")
 	ErrMessageTooLarge  = errors.New("RTMP message exceeds configured limit")
+	ErrUnauthorized     = errors.New("RTMP publish token rejected")
 )
 
 // Server represents an RTMP ingest server. It provides a standards-correct
@@ -47,6 +50,22 @@ type Server struct {
 	connections map[net.Conn]struct{}
 	acceptWG    sync.WaitGroup
 	connWG      sync.WaitGroup
+	authMu      sync.RWMutex
+	authManager *auth.Manager
+}
+
+// SetAuthManager configures optional publish-token validation. When nil,
+// publishing is permitted without a token (legacy behavior).
+func (s *Server) SetAuthManager(manager *auth.Manager) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.authManager = manager
+}
+
+func (s *Server) authManagerSnapshot() *auth.Manager {
+	s.authMu.RLock()
+	defer s.authMu.RUnlock()
+	return s.authManager
 }
 
 // NewServer creates a new RTMP server.
@@ -229,6 +248,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	}
 	handler := newConnectionHandler(conn, remote, s.registry, s.logger)
 	handler.readTimeout = s.config.ReadTimeout
+	handler.auth = s.authManagerSnapshot()
 	if err := handler.run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		s.logger.Error("connection error", zap.String("remote", remoteText), zap.Error(err))
 	}
@@ -251,6 +271,14 @@ type connectionHandler struct {
 	writer      *bufio.Writer
 	chunkSize   uint32
 	readTimeout time.Duration
+	auth        *auth.Manager
+}
+
+func (h *connectionHandler) remoteIP() string {
+	if h.remote == nil {
+		return ""
+	}
+	return h.remote.IP.String()
 }
 
 func newConnectionHandler(conn net.Conn, remote *net.TCPAddr, registry *core.StreamRegistry, logger *zap.Logger) *connectionHandler {
@@ -391,7 +419,8 @@ func (h *connectionHandler) readMessage() (*rtmpMessage, error) {
 	}
 	messageType := header[6]
 	streamID := binary.LittleEndian.Uint32(header[7:])
-	if timestamp == 0xffffff {
+	extendedTimestamp := timestamp == 0xffffff
+	if extendedTimestamp {
 		var extended [4]byte
 		if _, err := io.ReadFull(h.reader, extended[:]); err != nil {
 			return nil, err
@@ -421,8 +450,33 @@ func (h *connectionHandler) readMessage() (*rtmpMessage, error) {
 		if err != nil {
 			return nil, err
 		}
-		if continuation>>6 != 3 || uint32(continuation&0x3f) != chunkStreamID {
+		if continuation>>6 != 3 {
 			return nil, fmt.Errorf("invalid RTMP continuation chunk")
+		}
+		continuationID := uint32(continuation & 0x3f)
+		switch continuationID {
+		case 0:
+			var extended [1]byte
+			if _, err := io.ReadFull(h.reader, extended[:]); err != nil {
+				return nil, err
+			}
+			continuationID = uint32(extended[0]) + 64
+		case 1:
+			var extended [2]byte
+			if _, err := io.ReadFull(h.reader, extended[:]); err != nil {
+				return nil, err
+			}
+			continuationID = uint32(extended[0]) + uint32(extended[1])*256 + 64
+		}
+		if continuationID != chunkStreamID {
+			return nil, fmt.Errorf("invalid RTMP continuation chunk")
+		}
+		if extendedTimestamp {
+			// A Type-3 continuation chunk of a message that used the
+			// extended timestamp carries the 4-byte value again.
+			if _, err := io.ReadFull(h.reader, make([]byte, 4)); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return &rtmpMessage{Timestamp: timestamp, Length: length, MessageType: messageType, StreamID: streamID, Payload: payload}, nil
@@ -450,8 +504,12 @@ func (h *connectionHandler) processMessage(message *rtmpMessage) error {
 			if err != nil {
 				return err
 			}
-			if _, exists := h.registry.Get(streamKey); !exists {
-				if _, err := h.registry.Register(streamKey, streamKey); err != nil && !errors.Is(err, core.ErrStreamExists) {
+			streamID, token := auth.SplitStreamToken(streamKey)
+			if !auth.Authorize(h.auth, token, "publish", streamID, h.remoteIP()) {
+				return ErrUnauthorized
+			}
+			if _, exists := h.registry.Get(streamID); !exists {
+				if _, err := h.registry.Register(streamID, streamID); err != nil && !errors.Is(err, core.ErrStreamExists) {
 					return fmt.Errorf("register RTMP stream: %w", err)
 				}
 			}
@@ -470,7 +528,8 @@ func (h *connectionHandler) extractStreamKey(message []byte) (string, error) {
 	values := amfStringValues(message)
 	for i, value := range values {
 		if strings.EqualFold(value, "publish") && i+1 < len(values) {
-			if err := core.ValidateStreamID(values[i+1]); err != nil {
+			candidate, _ := auth.SplitStreamToken(values[i+1])
+			if err := core.ValidateStreamID(candidate); err != nil {
 				return "", fmt.Errorf("invalid RTMP stream key: %w", err)
 			}
 			return values[i+1], nil
@@ -487,20 +546,10 @@ func firstAMFString(data []byte) string {
 	return values[0]
 }
 
+// amfStringValues walks AMF0-encoded values and returns every string value
+// encountered, including strings nested inside objects and arrays. It stops
+// at the first malformed value, unlike a raw byte scan which can mistake
+// object keys, type markers, or number/bool payloads for strings.
 func amfStringValues(data []byte) []string {
-	values := make([]string, 0, 2)
-	for i := 0; i+3 <= len(data); i++ {
-		if data[i] != 2 {
-			continue
-		}
-		length := int(data[i+1])<<8 | int(data[i+2])
-		start := i + 3
-		end := start + length
-		if end > len(data) {
-			continue
-		}
-		values = append(values, string(data[start:end]))
-		i = end - 1
-	}
-	return values
+	return rtmpwire.Strings(data)
 }

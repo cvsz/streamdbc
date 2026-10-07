@@ -106,6 +106,10 @@ auth:
   jwt_expiry: "24h"
   api_keys:
     - "${STREMDBC_API_KEY}"
+  # When true, RTMP/RTSP/SRT ingest require publish tokens, RTMP output and
+  # WHEP require play tokens, mutations require X-API-Key, and /dashboard
+  # requires X-API-Key. Unset variables stay literal (${VAR}) and fail
+  # validation loudly instead of blanking the secret.
   allow_anonymous: false
 
 redis:

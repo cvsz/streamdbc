@@ -28,6 +28,12 @@ const maxSDPSize = 1 << 20
 // Server represents a WebRTC server supporting WHIP/WHEP control exchanges.
 // It negotiates peer connections and receives publisher tracks, but forwarding
 // those tracks to viewers is outside this repository's current media graph.
+const (
+	maxTotalPublishers         = 256
+	maxSessionViewersPerStream = 64
+	maxTotalSessionViewers     = 512
+)
+
 type Server struct {
 	config     *config.WebRTCConfig
 	registry   *core.StreamRegistry
@@ -338,6 +344,12 @@ func (s *Server) handleWHIP(c *gin.Context) {
 	publisher := &PeerConnection{ID: pcID, StreamID: streamID, Connection: pc, Type: "whip", CreatedAt: time.Now().UTC(), RemoteAddr: requestRemoteAddr(c.Request), State: "active"}
 	s.mu.Lock()
 	previous := s.publishers[streamID]
+	if len(s.publishers) >= maxTotalPublishers && s.publishers[streamID] == nil {
+		s.mu.Unlock()
+		_ = pc.Close()
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "publisher limit reached"})
+		return
+	}
 	s.publishers[streamID] = publisher
 	s.mu.Unlock()
 	if previous != nil && previous.Connection != nil {
@@ -400,6 +412,16 @@ func (s *Server) handleWHEP(c *gin.Context) {
 	pcID := uuid.NewString()
 	viewer := &PeerConnection{ID: pcID, StreamID: streamID, Connection: pc, Type: "whep", CreatedAt: time.Now().UTC(), RemoteAddr: requestRemoteAddr(c.Request), State: "active"}
 	s.mu.Lock()
+	totalViewers := 0
+	for _, sessions := range s.viewers {
+		totalViewers += len(sessions)
+	}
+	if len(s.viewers[streamID]) >= maxSessionViewersPerStream || totalViewers >= maxTotalSessionViewers {
+		s.mu.Unlock()
+		_ = pc.Close()
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "viewer limit reached"})
+		return
+	}
 	s.viewers[streamID] = append(s.viewers[streamID], viewer)
 	s.mu.Unlock()
 	if err := s.registry.IncrementViewers(streamID); err != nil {

@@ -186,3 +186,23 @@ func TestStreamRegistryStateTimestampsAndCleanup(t *testing.T) {
 	cancel()
 	registry.Cleanup(ctx, 0)
 }
+
+func TestUpdateUpdaterMayReenterRegistry(t *testing.T) {
+	r := NewStreamRegistry(config.DefaultConfig())
+	if _, err := r.Register("demo", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	err := r.Update("demo", func(info *StreamInfo) {
+		if _, ok := r.Get("demo"); !ok {
+			t.Error("expected reentrant Get to find stream")
+		}
+		info.Name = "renamed"
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := r.Get("demo")
+	if got.Name != "renamed" {
+		t.Fatalf("name = %q", got.Name)
+	}
+}

@@ -12,16 +12,16 @@ import (
 
 func TestSRTStreamIDExtractionRejectsMissingAndUnsafeValues(t *testing.T) {
 	server := NewServer(nil, nil, zap.NewNop())
-	if got := server.extractStreamID([]byte("streamid=demo\x00")); got != "demo" {
+	if got := server.extractStreamID([]byte("streamid=demo\x00"), nil); got != "demo" {
 		t.Fatalf("stream ID = %q", got)
 	}
-	if got := server.extractStreamID([]byte("streamid=../escape\x00")); got != "" {
+	if got := server.extractStreamID([]byte("streamid=../escape\x00"), nil); got != "" {
 		t.Fatalf("unsafe stream ID = %q", got)
 	}
-	if got := server.extractStreamID([]byte("unrelated packet")); got != "" {
+	if got := server.extractStreamID([]byte("unrelated packet"), nil); got != "" {
 		t.Fatalf("missing stream ID = %q", got)
 	}
-	if got := server.extractStreamID([]byte("prefix streamid=demo")); got != "" {
+	if got := server.extractStreamID([]byte("prefix streamid=demo"), nil); got != "" {
 		t.Fatalf("embedded stream ID was accepted: %q", got)
 	}
 }

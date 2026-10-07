@@ -137,3 +137,45 @@ func TestRecorderContainsCompletionCallbackPanics(t *testing.T) {
 		}
 	}
 }
+
+func TestRecorderArchivesSupersededRecordingInHistory(t *testing.T) {
+	manager := testRecorder(t)
+	if err := manager.StartRecording("demo", "rtmp://example/live", nil); err != nil {
+		t.Fatalf("start first recording: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		recording, ok := manager.GetRecording("demo")
+		if !ok {
+			t.Fatal("first recording missing")
+		}
+		if !isActive(recording.State) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("first recording still %q", recording.State)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	first, _ := manager.GetRecording("demo")
+	if err := manager.StartRecording("demo", "rtmp://example/live", nil); err != nil {
+		t.Fatalf("start second recording: %v", err)
+	}
+	recordings := manager.ListRecordings()
+	if len(recordings) != 2 {
+		t.Fatalf("expected current plus archived recording, got %d", len(recordings))
+	}
+	second, _ := manager.GetRecording("demo")
+	if second.ID == first.ID {
+		t.Fatal("current recording was not replaced")
+	}
+	archived := 0
+	for _, recording := range recordings {
+		if recording.ID == first.ID {
+			archived++
+		}
+	}
+	if archived != 1 {
+		t.Fatalf("superseded recording missing from history: %+v", recordings)
+	}
+}

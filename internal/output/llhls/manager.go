@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
+	"github.com/cvsz/stremdbc/internal/fsutil"
 	"go.uber.org/zap"
 )
 
@@ -42,6 +42,10 @@ type LLHLSStream struct {
 	PartCount    int
 	State        string
 	removed      bool
+	// dir is the pinned stream output directory. All segment, part, and
+	// playlist writes go through it so a post-creation symlink swap cannot
+	// redirect output outside the manager root.
+	dir *fsutil.PinnedDir
 
 	mu       sync.RWMutex
 	segments []int
@@ -129,24 +133,33 @@ func (m *Manager) Stop() error {
 	}
 	m.stopped = true
 	m.started = false
-	streamIDs := make([]string, 0, len(m.streams))
-	for streamID, stream := range m.streams {
+	detached := make([]*LLHLSStream, 0, len(m.streams))
+	for _, stream := range m.streams {
 		stream.mu.Lock()
 		stream.removed = true
 		stream.mu.Unlock()
-		streamIDs = append(streamIDs, streamID)
+		detached = append(detached, stream)
 	}
 	m.streams = make(map[string]*LLHLSStream)
 	m.mu.Unlock()
 	var removeErr error
-	for _, streamID := range streamIDs {
-		path := filepath.Join(m.outputPath, streamID)
-		if err := removeStreamOutput(m.outputPath, path); err != nil {
-			removeErr = errors.Join(removeErr, fmt.Errorf("remove LL-HLS output for %s: %w", streamID, err))
+	for _, stream := range detached {
+		if err := removePinnedStreamDir(stream); err != nil {
+			removeErr = errors.Join(removeErr, fmt.Errorf("remove LL-HLS output for %s: %w", stream.ID, err))
 		}
 	}
 	m.logger.Info("stopping LL-HLS manager")
 	return removeErr
+}
+
+// removePinnedStreamDir removes and closes a detached stream directory.
+func removePinnedStreamDir(stream *LLHLSStream) error {
+	if stream == nil || stream.dir == nil {
+		return nil
+	}
+	removeErr := stream.dir.RemoveAll()
+	closeErr := stream.dir.Close()
+	return errors.Join(removeErr, closeErr)
 }
 
 // CreateStream creates a new LL-HLS stream.
@@ -162,12 +175,13 @@ func (m *Manager) CreateStream(streamID string) error {
 	if _, exists := m.streams[streamID]; exists {
 		return fmt.Errorf("stream already exists")
 	}
-	streamPath, err := safeStreamDirectory(m.outputPath, streamID)
+	pinned, err := fsutil.OpenStreamDir(m.outputPath, streamID)
 	if err != nil {
 		return fmt.Errorf("failed to create stream directory: %w", err)
 	}
 	now := time.Now()
-	m.streams[streamID] = &LLHLSStream{ID: streamID, CreatedAt: now, State: "active"}
+	m.streams[streamID] = &LLHLSStream{ID: streamID, CreatedAt: now, State: "active", dir: pinned}
+	streamPath := pinned.Path()
 	m.logger.Info("LL-HLS stream created", zap.String("stream_id", streamID), zap.String("path", streamPath))
 	return nil
 }
@@ -186,8 +200,7 @@ func (m *Manager) RemoveStream(streamID string) error {
 	stream.mu.Lock()
 	stream.removed = true
 	stream.mu.Unlock()
-	streamPath := filepath.Join(m.outputPath, streamID)
-	removeErr := os.RemoveAll(streamPath)
+	removeErr := removePinnedStreamDir(stream)
 	delete(m.streams, streamID)
 	m.mu.Unlock()
 	if removeErr != nil {
@@ -212,13 +225,14 @@ func (m *Manager) AddSegment(streamID string, data []byte) error {
 	sequence := stream.SegmentCount
 	stream.segments = append(stream.segments, sequence)
 	stream.LastSegment = time.Now()
-	if err := atomicWriteFile(filepath.Join(m.outputPath, streamID, fmt.Sprintf("segment_%d.ts", sequence)), data, 0o640); err != nil {
+	segmentName := fmt.Sprintf("segment_%d.ts", sequence)
+	if err := stream.dir.WriteFile(segmentName, data, 0o640); err != nil {
 		stream.segments = stream.segments[:len(stream.segments)-1]
 		stream.SegmentCount--
 		return fmt.Errorf("failed to write segment: %w", err)
 	}
 	if err := m.writePlaylistLocked(streamID, stream); err != nil {
-		_ = os.Remove(filepath.Join(m.outputPath, streamID, fmt.Sprintf("segment_%d.ts", sequence)))
+		_ = stream.dir.RemoveFile(segmentName)
 		stream.segments = stream.segments[:len(stream.segments)-1]
 		stream.SegmentCount--
 		return fmt.Errorf("failed to write playlist: %w", err)
@@ -240,13 +254,14 @@ func (m *Manager) AddPart(streamID string, data []byte) error {
 	stream.PartCount++
 	sequence := stream.PartCount
 	stream.parts = append(stream.parts, sequence)
-	if err := atomicWriteFile(filepath.Join(m.outputPath, streamID, fmt.Sprintf("part_%d.m4s", sequence)), data, 0o640); err != nil {
+	partName := fmt.Sprintf("part_%d.m4s", sequence)
+	if err := stream.dir.WriteFile(partName, data, 0o640); err != nil {
 		stream.parts = stream.parts[:len(stream.parts)-1]
 		stream.PartCount--
 		return fmt.Errorf("failed to write part: %w", err)
 	}
 	if err := m.writePlaylistLocked(streamID, stream); err != nil {
-		_ = os.Remove(filepath.Join(m.outputPath, streamID, fmt.Sprintf("part_%d.m4s", sequence)))
+		_ = stream.dir.RemoveFile(partName)
 		stream.parts = stream.parts[:len(stream.parts)-1]
 		stream.PartCount--
 		return fmt.Errorf("failed to write playlist: %w", err)
@@ -291,7 +306,7 @@ func (m *Manager) writePlaylistLocked(streamID string, stream *LLHLSStream) erro
 	for _, segment := range segments {
 		playlist.WriteString(fmt.Sprintf("#EXTINF:%.3f,\nsegment_%d.ts\n", m.segmentDur.Seconds(), segment))
 	}
-	return atomicWriteFile(filepath.Join(m.outputPath, streamID, "index.m3u8"), []byte(playlist.String()), 0o640)
+	return stream.dir.WriteFile("index.m3u8", []byte(playlist.String()), 0o640)
 }
 
 func (m *Manager) stream(streamID string) (*LLHLSStream, error) {
@@ -387,18 +402,17 @@ func (m *Manager) cleanupOldFiles() {
 		for _, value := range keepParts {
 			keepPartSet[value] = struct{}{}
 		}
-		entries, err := os.ReadDir(filepath.Join(m.outputPath, stream.ID))
+		entries, err := stream.dir.FileNames()
 		if err == nil {
-			for _, entry := range entries {
-				name := entry.Name()
+			for _, name := range entries {
 				if value, ok := numberedFile(name, "segment_", ".ts"); ok {
 					if _, keep := keepSegmentSet[value]; !keep {
-						_ = os.Remove(filepath.Join(m.outputPath, stream.ID, name))
+						_ = stream.dir.RemoveFile(name)
 					}
 				}
 				if value, ok := numberedFile(name, "part_", ".m4s"); ok {
 					if _, keep := keepPartSet[value]; !keep {
-						_ = os.Remove(filepath.Join(m.outputPath, stream.ID, name))
+						_ = stream.dir.RemoveFile(name)
 					}
 				}
 			}
@@ -460,77 +474,4 @@ func (m *Manager) GetStats() map[string]interface{} {
 		"total_parts":    totalParts,
 		"output_path":    m.outputPath,
 	}
-}
-
-func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".stremdbc-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	n, err := tmp.Write(data)
-	if err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if n != len(data) {
-		_ = tmp.Close()
-		return io.ErrShortWrite
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
-}
-
-func removeStreamOutput(root, path string) error {
-	rootAbs, err := filepath.Abs(root)
-	if err != nil {
-		return err
-	}
-	pathAbs, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-	relative, err := filepath.Rel(rootAbs, pathAbs)
-	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
-		return fmt.Errorf("output path escapes root")
-	}
-	return os.RemoveAll(pathAbs)
-}
-
-func safeStreamDirectory(root, streamID string) (string, error) {
-	streamPath := filepath.Join(root, streamID)
-	if err := os.MkdirAll(streamPath, 0o750); err != nil {
-		return "", err
-	}
-	info, err := os.Lstat(streamPath)
-	if err != nil {
-		return "", err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("stream directory is a symlink")
-	}
-	rootResolved, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", err
-	}
-	streamResolved, err := filepath.EvalSymlinks(streamPath)
-	if err != nil {
-		return "", err
-	}
-	relative, err := filepath.Rel(rootResolved, streamResolved)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("stream directory escapes output root")
-	}
-	return streamPath, nil
 }

@@ -37,3 +37,39 @@ func TestMetricsClampCurrentCountsAndNeverExposeNegativeLiveGauge(t *testing.T) 
 		t.Fatalf("negative gauge exported:\n%s", data)
 	}
 }
+
+func TestSetCurrentStateReconcilesLiveGauge(t *testing.T) {
+	m := NewMetrics()
+	m.RecordStreamLive()
+	m.RecordStreamLive()
+	m.RecordStreamLive()
+	m.RecordStreamOffline()
+	m.SetCurrentState(5, 7)
+	m.RecordStreamOffline()
+
+	live := gaugeValue(t, m, "stremdbc_streams_live")
+	if live != 4 {
+		t.Fatalf("streams_live = %v, want 4 (SetCurrentState reseeds event counter)", live)
+	}
+	viewers := gaugeValue(t, m, "stremdbc_viewers_total")
+	if viewers != 7 {
+		t.Fatalf("viewers_total = %v, want 7", viewers)
+	}
+}
+
+func gaugeValue(t *testing.T, m *Metrics, name string) float64 {
+	t.Helper()
+	fams, err := m.registry.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	for _, fam := range fams {
+		if fam.GetName() == name {
+			for _, metric := range fam.GetMetric() {
+				return metric.GetGauge().GetValue()
+			}
+		}
+	}
+	t.Fatalf("metric %q not found", name)
+	return 0
+}

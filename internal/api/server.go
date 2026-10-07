@@ -223,15 +223,35 @@ func (s *Server) SetStaticRoutes(hlsPath, llhlsPath, playerFile, dashboardDir st
 		}))
 	}
 	if dashboardDir != "" {
-		s.registerRoute("/dashboard", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.registerRoute("/dashboard", s.requireManagementKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				s.methodNotAllowed(w)
 				return
 			}
 			http.Redirect(w, r, "/dashboard/", http.StatusTemporaryRedirect)
-		}))
-		s.registerRoute("/dashboard/", s.staticHandler("/dashboard/", dashboardDir, false))
+		})))
+		s.registerRoute("/dashboard/", s.requireManagementKey(s.staticHandler("/dashboard/", dashboardDir, false)))
 	}
+}
+
+// requireManagementKey gates the zero-build management UI behind a
+// management API key whenever authentication is configured. Without an auth
+// manager (local development) the UI stays open, matching authorizeMutation.
+// Playback and TV pages keep their own rules: authorizePlayback for media,
+// key-gated mutations for /tv actions.
+func (s *Server) requireManagementKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		manager := s.authManagerSnapshot()
+		if manager == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if hasValidManagementKey(manager, r.Header.Get("X-API-Key")) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		s.unauthorized(w)
+	})
 }
 
 // SetSamsungTV registers the F5500-specific pages, HLS output, and status and
@@ -728,13 +748,44 @@ func (s *Server) clearServer(server *http.Server) {
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		s.logger.Debug("request",
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(recorder, r)
+		// EscapedPath never includes the query string, so play tokens passed
+		// as ?token= cannot leak into logs through this field.
+		fields := []zap.Field{
 			zap.String("method", r.Method),
-			zap.Int("path_length", len(r.URL.EscapedPath())),
+			zap.String("path", r.URL.EscapedPath()),
+			zap.Int("status", recorder.status),
+			zap.String("client_ip", s.clientIP(r)),
 			zap.Duration("duration", time.Since(start)),
-		)
+		}
+		if isMutatingMethod(r.Method) {
+			// Mutations are audited at Info; reads stay at Debug.
+			s.logger.Info("request", fields...)
+			return
+		}
+		s.logger.Debug("request", fields...)
 	})
+}
+
+// statusRecorder captures the response status for access logging.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (recorder *statusRecorder) WriteHeader(status int) {
+	recorder.status = status
+	recorder.ResponseWriter.WriteHeader(status)
+}
+
+func isMutatingMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Server) securityHeadersMiddleware(next http.Handler) http.Handler {

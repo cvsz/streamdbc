@@ -40,8 +40,12 @@ type APIKeyValidator struct {
 type Claims struct {
 	StreamID string `json:"stream_id"`
 	Action   string `json:"action"` // publish or play
-	APIKey   string `json:"api_key,omitempty"`
-	IP       string `json:"ip,omitempty"`
+	// APIKey is reserved for future per-key attribution. Publish tokens never
+	// embed the raw API key: the key is only validated at token-minting time,
+	// and ValidateToken rejects any token that carries it (a token must remain
+	// a pure bearer credential, not a means to extract the management key).
+	APIKey string `json:"api_key,omitempty"`
+	IP     string `json:"ip,omitempty"`
 	jwt.RegisteredClaims
 }
 

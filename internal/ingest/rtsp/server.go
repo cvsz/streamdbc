@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/cvsz/stremdbc/internal/auth"
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
 	"go.uber.org/zap"
@@ -43,6 +44,45 @@ type Server struct {
 	acceptWG    sync.WaitGroup
 	connWG      sync.WaitGroup
 	sessionSeq  uint64
+	authMu      sync.RWMutex
+	auth        *auth.Manager
+}
+
+// SetAuthManager configures optional publish-token validation. When nil,
+// session setup is permitted without a token (legacy behavior).
+func (s *Server) SetAuthManager(manager *auth.Manager) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.auth = manager
+}
+
+func (s *Server) authSnapshot() *auth.Manager {
+	s.authMu.RLock()
+	defer s.authMu.RUnlock()
+	return s.auth
+}
+
+// authorizeSetup validates the publish token supplied either in the request
+// URI query (?token=...) or as an Authorization: Bearer header.
+func (s *Server) authorizeSetup(request *rtspRequest, streamID string, conn net.Conn) bool {
+	manager := s.authSnapshot()
+	if manager == nil {
+		return true
+	}
+	token := ""
+	if parsed, err := url.Parse(request.URI); err == nil {
+		token = parsed.Query().Get("token")
+	}
+	if token == "" {
+		token = auth.TokenFromHeader(request.Headers["authorization"])
+	}
+	ip := ""
+	if conn != nil && conn.RemoteAddr() != nil {
+		if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
+			ip = host
+		}
+	}
+	return auth.Authorize(manager, token, "publish", streamID, ip)
 }
 
 // Session represents an RTSP session and is returned as a snapshot.
@@ -378,6 +418,9 @@ func (s *Server) handleRequest(request *rtspRequest, sessionID string, conn net.
 		streamID := s.extractStreamID(request.URI)
 		if streamID == "" {
 			return rtspResponse("400 Bad Request", cseq, nil, ""), sessionID, false
+		}
+		if !s.authorizeSetup(request, streamID, conn) {
+			return rtspResponse("401 Unauthorized", cseq, nil, ""), sessionID, false
 		}
 		if sessionID != "" {
 			if status := s.sessionStreamStatus(sessionID, streamID); status != "" {

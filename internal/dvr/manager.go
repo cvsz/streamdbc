@@ -60,6 +60,7 @@ type DVRSession struct {
 	activeSince    time.Time
 	activeDuration time.Duration
 	previousState  core.StreamState
+	fileMu         sync.Mutex
 }
 
 // NewManager creates a new DVR manager.
@@ -133,20 +134,21 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.ctx, m.cancel = context.WithCancel(ctx)
 	m.started = true
 	m.wg.Add(1)
+	loopCtx := m.ctx
 	m.mu.Unlock()
 
 	m.logger.Info("DVR manager started", zap.String("output_path", m.outputPath), zap.Duration("max_duration", m.maxDuration))
-	go m.cleanupLoop()
+	go m.cleanupLoop(loopCtx)
 	return nil
 }
 
-func (m *Manager) cleanupLoop() {
+func (m *Manager) cleanupLoop(ctx context.Context) {
 	defer m.wg.Done()
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-m.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			if err := m.CleanupOldRecordings(); err != nil {
@@ -235,14 +237,24 @@ func (m *Manager) StartRecording(streamID string) error {
 	return nil
 }
 
-// Write appends media bytes to an active DVR session.
+// Write appends media bytes to an active DVR session. The write itself does
+// not hold the manager lock, so other sessions remain usable while a slow
+// disk blocks one stream.
 func (m *Manager) Write(streamID string, data []byte) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	session, exists := m.sessions[streamID]
 	if !exists {
+		m.mu.Unlock()
 		return ErrSessionNotFound
 	}
+	if session.State != stateRecording || session.file == nil {
+		m.mu.Unlock()
+		return ErrSessionNotRecording
+	}
+	m.mu.Unlock()
+
+	session.fileMu.Lock()
+	defer session.fileMu.Unlock()
 	if session.State != stateRecording || session.file == nil {
 		return ErrSessionNotRecording
 	}
@@ -253,7 +265,9 @@ func (m *Manager) Write(streamID string, data []byte) error {
 	if n != len(data) {
 		return io.ErrShortWrite
 	}
+	m.mu.Lock()
 	session.FileSize += int64(n)
+	m.mu.Unlock()
 	return nil
 }
 
@@ -273,12 +287,14 @@ func (m *Manager) stopSessionLocked(streamID string) error {
 		return nil
 	}
 	m.updateDurationLocked(session, time.Now())
+	session.fileMu.Lock()
 	var closeErr error
 	if session.file != nil {
 		closeErr = errors.Join(session.file.Sync(), session.file.Close())
 		session.file = nil
 	}
 	session.State = stateStopped
+	session.fileMu.Unlock()
 	if current, exists := m.registry.Get(streamID); exists && current.State == core.StreamStateRecording {
 		if err := m.registry.SetState(streamID, session.previousState); err != nil && !errors.Is(err, core.ErrStreamNotFound) {
 			return errors.Join(closeErr, err)
@@ -417,10 +433,15 @@ func (m *Manager) updateDurationLocked(session *DVRSession, now time.Time) {
 }
 
 func sessionSnapshot(session *DVRSession) *DVRSession {
-	copy := *session
-	copy.file = nil
-	copy.activeSince = time.Time{}
-	return &copy
+	return &DVRSession{
+		ID:         session.ID,
+		StreamID:   session.StreamID,
+		CreatedAt:  session.CreatedAt,
+		Duration:   session.Duration,
+		State:      session.State,
+		OutputPath: session.OutputPath,
+		FileSize:   session.FileSize,
+	}
 }
 
 func safeStreamDirectory(root, streamID string) (string, error) {

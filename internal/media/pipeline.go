@@ -38,6 +38,7 @@ type Pipeline struct {
 	BytesIn   int64
 	BytesOut  int64
 	mu        sync.Mutex
+	writeMu   sync.Mutex
 }
 
 // Manager manages media pipelines.
@@ -222,26 +223,41 @@ func (m *Manager) Process(ctx context.Context, streamID string, data []byte) err
 	}
 
 	pipeline.mu.Lock()
-	defer pipeline.mu.Unlock()
 	if pipeline.State != pipelineStateRunning {
+		pipeline.mu.Unlock()
 		return ErrPipelineNotRunning
 	}
 	if err := contextError(ctx); err != nil {
+		pipeline.mu.Unlock()
 		return err
 	}
-
 	if len(data) == 0 {
+		pipeline.mu.Unlock()
 		return nil
 	}
 	if pipeline.Output == nil {
+		pipeline.mu.Unlock()
 		return ErrPipelineNoOutput
 	}
+	output := pipeline.Output
+	pipeline.mu.Unlock()
+
+	// Writes to the output are serialized per pipeline but do not hold the
+	// state lock, so GetStats/StopPipeline/RemovePipeline are not blocked by
+	// a slow writer.
+	pipeline.writeMu.Lock()
+	n, writeErr := output.Write(data)
+	pipeline.writeMu.Unlock()
+
+	pipeline.mu.Lock()
 	pipeline.BytesIn += int64(len(data))
-	n, writeErr := pipeline.Output.Write(data)
+	if n > 0 && n <= len(data) {
+		pipeline.BytesOut += int64(n)
+	}
+	pipeline.mu.Unlock()
 	if n < 0 || n > len(data) {
 		return fmt.Errorf("invalid output write count %d", n)
 	}
-	pipeline.BytesOut += int64(n)
 	if writeErr != nil {
 		return fmt.Errorf("write pipeline output: %w", writeErr)
 	}

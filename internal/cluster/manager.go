@@ -324,7 +324,11 @@ func (m *Manager) GetNodes() []*Node {
 	}
 	m.mu.RUnlock()
 	if len(result) > 1 {
-		sort.SliceStable(result[1:], func(i, j int) bool { return result[1+i].ID < result[1+j].ID })
+		start := 0
+		if m.node != nil {
+			start = 1
+		}
+		sort.SliceStable(result[start:], func(i, j int) bool { return result[start+i].ID < result[start+j].ID })
 	}
 	return result
 }

@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cvsz/stremdbc/internal/config"
 )
@@ -91,4 +92,20 @@ func hasSequence(values []string, expected ...string) bool {
 		}
 	}
 	return false
+}
+
+func TestBuildArgsRejectsBackslashInDirectShowLabel(t *testing.T) {
+	cfg := validTVConfig(t)
+	cfg.VideoDevice = `Camera\`
+	if _, err := BuildArgs(cfg); err == nil {
+		t.Fatal("backslash in DirectShow device label should be rejected")
+	}
+}
+
+func TestBuildArgsRejectsFractionalSegmentDuration(t *testing.T) {
+	cfg := validTVConfig(t)
+	cfg.SegmentDuration = 1500 * time.Millisecond
+	if _, err := BuildArgs(cfg); err == nil {
+		t.Fatal("fractional segment duration should be rejected")
+	}
 }

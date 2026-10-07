@@ -150,8 +150,9 @@ func resolveFFmpeg(configured string) string {
 			names = append(names, entry.Name())
 		}
 	}
-	// Newest managed version wins, so the directory listing is sorted descending.
-	sort.Sort(sort.Reverse(sort.StringSlice(names)))
+	// Newest managed version wins, so the directory listing is sorted by
+	// numeric path segments (10.x must sort above 9.x).
+	sort.Slice(names, func(i, j int) bool { return compareVersionDirs(names[i], names[j]) > 0 })
 	candidates := []string{"ffmpeg.exe", "ffmpeg"}
 	for _, name := range names {
 		for _, candidate := range candidates {
@@ -163,6 +164,30 @@ func resolveFFmpeg(configured string) string {
 		}
 	}
 	return ""
+}
+
+// compareVersionDirs compares directory names as dot-separated numeric
+// versions, falling back to string comparison for non-numeric segments.
+func compareVersionDirs(a, b string) int {
+	aParts := strings.Split(a, ".")
+	bParts := strings.Split(b, ".")
+	for i := 0; i < len(aParts) && i < len(bParts); i++ {
+		aNum, aErr := strconv.Atoi(aParts[i])
+		bNum, bErr := strconv.Atoi(bParts[i])
+		if aErr == nil && bErr == nil {
+			if aNum != bNum {
+				return aNum - bNum
+			}
+			continue
+		}
+		if aParts[i] != bParts[i] {
+			if aParts[i] < bParts[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	return len(aParts) - len(bParts)
 }
 
 // newManager accepts a process runner for lifecycle tests while production

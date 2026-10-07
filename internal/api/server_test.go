@@ -15,6 +15,7 @@ import (
 	samsunggateway "github.com/cvsz/stremdbc/internal/gateway/samsung"
 	"github.com/cvsz/stremdbc/internal/metrics"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -503,5 +504,68 @@ func TestSamsungTVStartRequiresBoundedEmptyJSONBody(t *testing.T) {
 		if res.Code != http.StatusBadRequest {
 			t.Errorf("body %q returned %d, want 400", body, res.Code)
 		}
+	}
+}
+
+func TestDashboardRequiresAPIKeyWhenAuthEnabled(t *testing.T) {
+	dashboard := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dashboard, "index.html"), []byte("<html></html>"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	server := newTestServer(t)
+	server.SetStaticRoutes("", "", "", dashboard)
+
+	getDashboard := func(key string) int {
+		req := httptest.NewRequest(http.MethodGet, "/dashboard/index.html", nil)
+		if key != "" {
+			req.Header.Set("X-API-Key", key)
+		}
+		res := httptest.NewRecorder()
+		server.Handler().ServeHTTP(res, req)
+		return res.Code
+	}
+	if got := getDashboard(""); got != http.StatusOK {
+		t.Fatalf("dashboard without auth manager returned %d", got)
+	}
+
+	manager, err := auth.NewManager("0123456789abcdef0123456789abcdef0123456789abcdef", "15m", []string{"secret-key-123456"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.SetAuthManager(manager)
+
+	if got := getDashboard(""); got != http.StatusUnauthorized {
+		t.Fatalf("dashboard without API key returned %d", got)
+	}
+	if got := getDashboard("secret-key-123456"); got != http.StatusOK {
+		t.Fatalf("dashboard with API key returned %d", got)
+	}
+}
+
+func TestAuditLogRecordsMutationStatusAndPath(t *testing.T) {
+	coreLogs, observed := observer.New(zap.InfoLevel)
+	cfg := config.DefaultConfig()
+	registry := core.NewStreamRegistry(cfg)
+	server := NewServer(&cfg.API, registry, metrics.NewMetrics(), zap.New(coreLogs))
+	server.SetVersion("test")
+
+	body := `{"id":"demo","name":"Demo"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/streams", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+	server.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create stream returned %d: %s", res.Code, res.Body.String())
+	}
+	entries := observed.FilterMessage("request").FilterField(zap.String("method", http.MethodPost)).All()
+	if len(entries) != 1 {
+		t.Fatalf("expected one audit entry, got %d", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["path"] != "/api/v1/streams" {
+		t.Fatalf("audit path = %v", fields["path"])
+	}
+	if fields["status"] != int64(http.StatusCreated) {
+		t.Fatalf("audit status = %v", fields["status"])
 	}
 }

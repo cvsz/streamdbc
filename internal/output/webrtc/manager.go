@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cvsz/stremdbc/internal/auth"
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
 	"github.com/google/uuid"
@@ -19,6 +20,7 @@ var (
 	ErrOutputManagerStopped    = errors.New("WebRTC output manager is stopped")
 	ErrOutputManagerNotStarted = errors.New("WebRTC output manager is not started")
 	ErrInvalidOffer            = errors.New("invalid WebRTC offer")
+	ErrUnauthorized            = errors.New("WebRTC viewer token rejected")
 )
 
 // OutputManager manages WebRTC output (WHEP) control sessions. Peer
@@ -37,6 +39,21 @@ type OutputManager struct {
 	stopped   bool
 	ctx       context.Context
 	cancel    context.CancelFunc
+	authMu    sync.RWMutex
+	auth      *auth.Manager
+}
+
+// SetAuthManager configures optional play-token validation for WHEP viewers.
+func (m *OutputManager) SetAuthManager(manager *auth.Manager) {
+	m.authMu.Lock()
+	defer m.authMu.Unlock()
+	m.auth = manager
+}
+
+func (m *OutputManager) authSnapshot() *auth.Manager {
+	m.authMu.RLock()
+	defer m.authMu.RUnlock()
+	return m.auth
 }
 
 // ViewerSession represents a WebRTC viewer session and is returned as a
@@ -127,8 +144,19 @@ func (m *OutputManager) Stop() error {
 	return nil
 }
 
+const (
+	maxSessionViewersPerStream = 64
+	maxTotalSessionViewers     = 512
+)
+
 // CreateViewer negotiates a WHEP viewer session for a live stream.
 func (m *OutputManager) CreateViewer(streamID string, offer webrtc.SessionDescription, remoteAddr string) (*ViewerSession, webrtc.SessionDescription, error) {
+	return m.CreateViewerWithToken(streamID, offer, remoteAddr, "", "")
+}
+
+// CreateViewerWithToken is CreateViewer with explicit play-token validation.
+// ip is the client address used for token IP-binding checks.
+func (m *OutputManager) CreateViewerWithToken(streamID string, offer webrtc.SessionDescription, remoteAddr, ip, token string) (*ViewerSession, webrtc.SessionDescription, error) {
 	if err := core.ValidateStreamID(streamID); err != nil {
 		return nil, webrtc.SessionDescription{}, err
 	}
@@ -136,12 +164,16 @@ func (m *OutputManager) CreateViewer(streamID string, offer webrtc.SessionDescri
 		return nil, webrtc.SessionDescription{}, err
 	}
 	m.lifecycle.Lock()
-	defer m.lifecycle.Unlock()
-	if !m.started {
+	started, stopped := m.started, m.stopped
+	m.lifecycle.Unlock()
+	if !started {
 		return nil, webrtc.SessionDescription{}, ErrOutputManagerNotStarted
 	}
-	if m.stopped {
+	if stopped {
 		return nil, webrtc.SessionDescription{}, ErrOutputManagerStopped
+	}
+	if !auth.Authorize(m.authSnapshot(), token, "play", streamID, ip) {
+		return nil, webrtc.SessionDescription{}, ErrUnauthorized
 	}
 	stream, exists := m.registry.Get(streamID)
 	if !exists {
@@ -191,9 +223,26 @@ func (m *OutputManager) CreateViewer(streamID string, offer webrtc.SessionDescri
 			m.removeViewer(streamID, pc)
 		}
 	})
+	m.lifecycle.Lock()
+	if m.stopped || !m.started {
+		m.lifecycle.Unlock()
+		_ = pc.Close()
+		return nil, webrtc.SessionDescription{}, ErrOutputManagerStopped
+	}
 	m.mu.Lock()
+	totalViewers := 0
+	for _, sessions := range m.viewers {
+		totalViewers += len(sessions)
+	}
+	if len(m.viewers[streamID]) >= maxSessionViewersPerStream || totalViewers >= maxTotalSessionViewers {
+		m.mu.Unlock()
+		m.lifecycle.Unlock()
+		_ = pc.Close()
+		return nil, webrtc.SessionDescription{}, fmt.Errorf("viewer session limit reached")
+	}
 	m.viewers[streamID] = append(m.viewers[streamID], session)
 	m.mu.Unlock()
+	m.lifecycle.Unlock()
 	if err := m.registry.IncrementViewers(streamID); err != nil {
 		m.removeViewer(streamID, pc)
 		_ = pc.Close()

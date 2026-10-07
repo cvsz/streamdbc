@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -456,6 +457,23 @@ func expandConfigEnv(v interface{}) error {
 	return expandEnvValue(rv)
 }
 
+// expandEnvPreservingUnset behaves like os.ExpandEnv, except that references
+// to environment variables that are not set are left intact instead of
+// expanding to the empty string. This prevents an unset variable from
+// silently blanking a secret such as a JWT secret or password.
+var envReference = regexp.MustCompile(`\$(\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)`)
+
+func expandEnvPreservingUnset(value string) string {
+	return envReference.ReplaceAllStringFunc(value, func(match string) string {
+		name := strings.TrimPrefix(match, "$")
+		name = strings.TrimSuffix(strings.TrimPrefix(name, "{"), "}")
+		if resolved, ok := os.LookupEnv(name); ok {
+			return resolved
+		}
+		return match
+	})
+}
+
 func expandEnvValue(rv reflect.Value) error {
 	if !rv.IsValid() {
 		return nil
@@ -463,7 +481,7 @@ func expandEnvValue(rv reflect.Value) error {
 	switch rv.Kind() {
 	case reflect.String:
 		if rv.CanSet() {
-			rv.SetString(os.ExpandEnv(rv.String()))
+			rv.SetString(expandEnvPreservingUnset(rv.String()))
 		}
 	case reflect.Struct:
 		for i := 0; i < rv.NumField(); i++ {
@@ -485,9 +503,16 @@ func expandEnvValue(rv reflect.Value) error {
 		}
 	case reflect.Map:
 		for _, key := range rv.MapKeys() {
-			if err := expandEnvValue(rv.MapIndex(key)); err != nil {
+			elem := rv.MapIndex(key)
+			if !elem.IsValid() {
+				continue
+			}
+			copied := reflect.New(elem.Type()).Elem()
+			copied.Set(elem)
+			if err := expandEnvValue(copied); err != nil {
 				return err
 			}
+			rv.SetMapIndex(key, copied)
 		}
 	}
 	return nil
@@ -737,8 +762,8 @@ func (c *Config) Validate() error {
 		}
 		if c.SamsungTV.Source == "vmix_external" {
 			for name, device := range map[string]string{"video_device": c.SamsungTV.VideoDevice, "audio_device": c.SamsungTV.AudioDevice} {
-				if device == "" || strings.TrimSpace(device) != device || len(device) > 256 || strings.IndexFunc(device, unicode.IsControl) >= 0 || strings.ContainsAny(device, "\":") {
-					return fmt.Errorf("samsung_tv.%s must be a DirectShow device label without quotes, colons, or control characters", name)
+				if device == "" || strings.TrimSpace(device) != device || len(device) > 256 || strings.IndexFunc(device, unicode.IsControl) >= 0 || strings.ContainsAny(device, "\":\\") {
+					return fmt.Errorf("samsung_tv.%s must be a DirectShow device label without quotes, colons, backslashes, or control characters", name)
 				}
 			}
 		}
@@ -818,9 +843,6 @@ func (c *Config) Validate() error {
 			seenKeys[key] = struct{}{}
 		}
 	}
-	if c.Auth.Enable && (c.RTMP.Enable || c.RTSP.Enable) {
-		return fmt.Errorf("publish authentication is not integrated with RTMP/RTSP ingest; keep those adapters disabled")
-	}
 	if c.Cluster.Enable {
 		if !c.Redis.Enable {
 			return fmt.Errorf("cluster mode requires redis.enable=true")
@@ -851,8 +873,17 @@ func (c *Config) Validate() error {
 		if strings.IndexFunc(c.Redis.Prefix, func(r rune) bool { return r == '\r' || r == '\n' }) >= 0 {
 			return fmt.Errorf("redis prefix contains a line break")
 		}
+		if strings.ContainsAny(c.Redis.Prefix, "*?[]") {
+			return fmt.Errorf("redis prefix must not contain glob characters (*?[])")
+		}
 		if c.Redis.DB < 0 || c.Redis.DB > 15 {
 			return fmt.Errorf("redis DB must be between 0 and 15")
+		}
+		if strings.TrimSpace(c.Redis.Password) == "" && !isLoopbackHost(c.Redis.Host) {
+			// Cluster node records are read from Redis: an unauthenticated
+			// Redis on a non-local network lets anyone on that network inject
+			// node addresses. Local development over loopback stays allowed.
+			return fmt.Errorf("redis password is required for non-loopback host %q", c.Redis.Host)
 		}
 	}
 	if c.Postgres.Enable {
@@ -949,6 +980,25 @@ func nonEmpty(values []string) []string {
 		}
 	}
 	return result
+}
+
+// isLoopbackHost reports whether host is a loopback name or IP. Redis
+// without a password is tolerated only for local development over loopback.
+func isLoopbackHost(host string) bool {
+	trimmed := strings.TrimSpace(host)
+	if trimmed == "localhost" {
+		return true
+	}
+	if strings.Contains(trimmed, ":") {
+		if zone := strings.LastIndexByte(trimmed, '%'); zone >= 0 {
+			trimmed = trimmed[:zone]
+		}
+		trimmed = strings.Trim(trimmed, "[]")
+	}
+	if ip := net.ParseIP(trimmed); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func validateDataPath(name, path string) error {

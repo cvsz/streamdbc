@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/cvsz/stremdbc/internal/auth"
 	"github.com/cvsz/stremdbc/internal/config"
 	"github.com/cvsz/stremdbc/internal/core"
 	"go.uber.org/zap"
@@ -42,6 +43,45 @@ type Server struct {
 	connections map[net.Conn]struct{}
 	acceptWG    sync.WaitGroup
 	connWG      sync.WaitGroup
+	authMu      sync.RWMutex
+	auth        *auth.Manager
+}
+
+// SetAuthManager configures optional play-token validation. When nil,
+// playback is permitted without a token (legacy behavior).
+func (s *Server) SetAuthManager(manager *auth.Manager) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.auth = manager
+}
+
+func (s *Server) authSnapshot() *auth.Manager {
+	s.authMu.RLock()
+	defer s.authMu.RUnlock()
+	return s.auth
+}
+
+// authorizePlayback validates the play token supplied either in the request
+// URI query (?token=...) or as an Authorization: Bearer header.
+func (s *Server) authorizePlayback(request *rtspRequest, streamID string, conn net.Conn) bool {
+	manager := s.authSnapshot()
+	if manager == nil {
+		return true
+	}
+	token := ""
+	if parsed, err := url.Parse(request.URI); err == nil {
+		token = parsed.Query().Get("token")
+	}
+	if token == "" {
+		token = auth.TokenFromHeader(request.Headers["authorization"])
+	}
+	ip := ""
+	if conn != nil && conn.RemoteAddr() != nil {
+		if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
+			ip = host
+		}
+	}
+	return auth.Authorize(manager, token, "play", streamID, ip)
 }
 
 // Session represents an RTSP output session and is returned as a snapshot.
@@ -246,6 +286,15 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 			return
 		}
 		if streamID := extractStreamID(request.URI); streamID != "" {
+			if !s.authorizePlayback(request, streamID, conn) {
+				if _, err := writer.WriteString("RTSP/1.0 401 Unauthorized\r\nCSeq: " + request.CSeq + "\r\nContent-Length: 0\r\n\r\n"); err != nil {
+					return
+				}
+				if err := writer.Flush(); err != nil {
+					return
+				}
+				continue
+			}
 			s.mu.Lock()
 			if current, exists := s.sessions[sessionID]; exists {
 				current.StreamID = streamID

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -100,7 +101,7 @@ func TestConfigRequiresAuthenticationCredential(t *testing.T) {
 	}
 }
 
-func TestConfigRejectsUnauthenticatedLegacyIngestWithAuthEnabled(t *testing.T) {
+func TestConfigAcceptsLegacyIngestWithAuthEnabled(t *testing.T) {
 	for _, name := range []string{"RTMP", "RTSP"} {
 		cfg := DefaultConfig()
 		cfg.Auth.Enable = true
@@ -111,8 +112,8 @@ func TestConfigRejectsUnauthenticatedLegacyIngestWithAuthEnabled(t *testing.T) {
 		} else {
 			cfg.RTSP.Enable = true
 		}
-		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "publish authentication") {
-			t.Fatalf("%s with auth should be rejected, got %v", name, err)
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("%s with auth should now be accepted (publish tokens enforced), got %v", name, err)
 		}
 	}
 }
@@ -346,5 +347,57 @@ func TestConfigRejectsInvalidProxyAndRateLimit(t *testing.T) {
 	cfg.WebRTC.CORSOrigins = nil
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "cors_origins") {
 		t.Fatalf("expected WebRTC CORS requirement error, got %v", err)
+	}
+}
+
+func TestExpandConfigEnvExpandsMapValues(t *testing.T) {
+	t.Setenv("STREMDBC_TEST_HOST", "example.local")
+	cfg := DefaultConfig()
+	if err := expandEnvValue(reflect.ValueOf(&cfg.Redis)); err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if cfg.Redis.Host == "" {
+		t.Fatal("expected Redis.Host to be set")
+	}
+}
+
+func TestExpandConfigEnvHandlesMaps(t *testing.T) {
+	t.Setenv("STREMDBC_TMP_VAL", "replaced")
+	m := map[string]string{"k": "${STREMDBC_TMP_VAL}"}
+	if err := expandEnvValue(reflect.ValueOf(m)); err != nil {
+		t.Fatalf("expand: %v", err)
+	}
+	if m["k"] != "replaced" {
+		t.Fatalf("map value = %q", m["k"])
+	}
+}
+
+func TestExpandEnvPreservingUnsetLeavesReferenceIntact(t *testing.T) {
+	os.Unsetenv("STREMDBC_DEFINITELY_UNSET_VAR")
+	if got := expandEnvPreservingUnset("${STREMDBC_DEFINITELY_UNSET_VAR}"); got != "${STREMDBC_DEFINITELY_UNSET_VAR}" {
+		t.Fatalf("unset variable was rewritten to %q", got)
+	}
+	t.Setenv("STREMDBC_SET_VAR", "ok")
+	if got := expandEnvPreservingUnset("${STREMDBC_SET_VAR}"); got != "ok" {
+		t.Fatalf("set variable = %q", got)
+	}
+}
+
+func TestRedisRequiresPasswordOffLoopback(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Redis.Enable = true
+	cfg.Redis.Host = "redis"
+	cfg.Redis.Password = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected passwordless remote Redis to fail")
+	}
+	cfg.Redis.Password = "redis-password-123456789"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("authenticated Redis rejected: %v", err)
+	}
+	cfg.Redis.Host = "127.0.0.1"
+	cfg.Redis.Password = ""
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("loopback Redis without password rejected: %v", err)
 	}
 }

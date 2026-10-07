@@ -106,20 +106,23 @@ func (r *StreamRegistry) Get(id string) (*StreamInfo, bool) {
 	return cloneStreamInfo(info), true
 }
 
-// Update updates stream information
+// Update updates stream information. The updater runs on a private snapshot
+// outside the registry lock, so it may safely re-enter the registry; reentrant
+// reads observe the pre-update state. Two concurrent updates are ordered
+// last-writer-wins after each candidate passes the same validation.
 func (r *StreamRegistry) Update(id string, updater func(*StreamInfo)) error {
 	if updater == nil {
 		return ErrInvalidUpdater
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
+	r.mu.RLock()
 	info, exists := r.streams[id]
 	if !exists {
+		r.mu.RUnlock()
 		return ErrStreamNotFound
 	}
-
 	candidate := cloneStreamInfo(info)
+	r.mu.RUnlock()
+
 	updater(candidate)
 	if candidate.ID != id {
 		return ErrInvalidStreamID
@@ -148,8 +151,14 @@ func (r *StreamRegistry) Update(id string, updater func(*StreamInfo)) error {
 			return fmt.Errorf("metadata value is invalid")
 		}
 	}
-	*info = *candidate
-	info.Metadata = cloneMetadata(candidate.Metadata)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, exists := r.streams[id]
+	if !exists {
+		return ErrStreamNotFound
+	}
+	*current = *candidate
+	current.Metadata = cloneMetadata(candidate.Metadata)
 	return nil
 }
 

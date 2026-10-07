@@ -62,6 +62,9 @@ services:
     networks:
       - stremdbc-network
 
+  # Reserved for a future PostgreSQL-backed catalog. The runtime rejects
+  # postgres.enable=true until the schema integration is wired, so this
+  # service stays profile-gated and is never started by default.
   postgres:
     image: postgres:16.4-alpine
     container_name: stremdbc-postgres

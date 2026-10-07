@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/cvsz/stremdbc/internal/config"
 )
@@ -46,6 +47,9 @@ func BuildArgs(cfg config.SamsungTVConfig) ([]string, error) {
 	}
 
 	segmentSeconds := int(cfg.SegmentDuration.Seconds())
+	if segmentSeconds <= 0 || cfg.SegmentDuration != time.Duration(segmentSeconds)*time.Second {
+		return nil, fmt.Errorf("samsung TV segment duration must be a positive whole number of seconds")
+	}
 	gop := cfg.FrameRate * segmentSeconds
 	args = append(args,
 		"-c:v", "libx264",
@@ -80,7 +84,7 @@ func BuildArgs(cfg config.SamsungTVConfig) ([]string, error) {
 
 func containsDeviceDelimiter(value string) bool {
 	for _, character := range value {
-		if character == '"' || character == ':' || character == '\r' || character == '\n' || character == 0 {
+		if character == '"' || character == ':' || character == '\\' || character == '\r' || character == '\n' || character == 0 {
 			return true
 		}
 	}

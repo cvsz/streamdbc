@@ -111,3 +111,36 @@ func TestWebRTCServerCopiesICEServerURLs(t *testing.T) {
 		t.Fatalf("WebRTC server retained mutable ICE configuration: %q", got)
 	}
 }
+
+func TestWebRTCWHEPRequiresPlayToken(t *testing.T) {
+	server, err := NewServer(&config.WebRTCConfig{CORSOrigins: []string{"https://player.example"}}, nil, zap.NewNop())
+	if err != nil {
+		t.Fatalf("new WebRTC server: %v", err)
+	}
+	manager, err := auth.NewManager("0123456789abcdef0123456789abcdef0123456789abcdef", "15m", []string{"secret-key-123456"}, false)
+	if err != nil {
+		t.Fatalf("new auth manager: %v", err)
+	}
+	server.SetAuthManager(manager)
+
+	postWHEP := func(target string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest("POST", target, strings.NewReader("v=0\r\n"))
+		request.Header.Set("Content-Type", "application/sdp")
+		request.Header.Set("Origin", "https://player.example")
+		response := httptest.NewRecorder()
+		server.api.ServeHTTP(response, request)
+		return response
+	}
+	if response := postWHEP("/whep/demo"); response.Code != 401 {
+		t.Fatalf("anonymous WHEP request returned %d: %s", response.Code, response.Body.String())
+	}
+	token, err := manager.GeneratePlayToken("demo", "")
+	if err != nil {
+		t.Fatalf("generate play token: %v", err)
+	}
+	// A valid token passes authorization; the request then fails because no
+	// live stream named demo is registered (proving the auth gate passed).
+	if response := postWHEP("/whep/demo?token=" + token); response.Code != 404 {
+		t.Fatalf("authorized WHEP request returned %d: %s", response.Code, response.Body.String())
+	}
+}
