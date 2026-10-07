@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<widget>
+  <cpname itemtype="string">ZEAZDEV</cpname>
+  <cpauth itemtype="string">ZEAZDEV</cpauth>
+  <title itemtype="string">StreamDBC TV</title>
+  <description itemtype="string">StreamDBC fullscreen launcher for Samsung F5500 Legacy Smart TV</description>
+  <ver itemtype="string">1.0.0</ver>
+  <mgrver itemtype="string">1.000</mgrver>
+  <fullwidget itemtype="boolean">y</fullwidget>
+  <network itemtype="boolean">y</network>
+</widget>
