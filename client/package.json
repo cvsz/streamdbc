@@ -1,19 +1,20 @@
 {
   "name": "stremdbc-client",
-  "version": "1.1.0",
-  "description": "StreamDBC Windows Control Panel with Samsung F5500 builder and streaming management",
+  "version": "1.2.0",
+  "description": "StreamDBC Windows Control Panel with bundled server runtime, System Tray, Samsung F5500 gateway, and Cloudflare LAN DNS sync",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "build": "node build.js",
-    "build:win": "node build.js --windows",
+    "build:win": "npm run vendor && npm run prepare-runtime && electron-builder --win nsis portable --publish never",
     "dev": "electron . --enable-logging",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "vendor": "node scripts/vendor-hls.js",
     "prestart": "npm run vendor",
     "prepack": "npm run vendor",
-    "predist": "npm run vendor"
+    "predist": "npm run vendor && npm run prepare-runtime",
+    "prepare-runtime": "node scripts/prepare-server-runtime.js"
   },
   "dependencies": {
     "electron-updater": "^6.3.0",
@@ -26,7 +27,7 @@
   },
   "build": {
     "appId": "com.stremdbc.client",
-    "productName": "STREMDBC Client",
+    "productName": "StreamDBC Control Panel",
     "files": [
       "main.js",
       "preload.js",
@@ -68,6 +69,10 @@
       {
         "from": "assets/",
         "to": "assets/"
+      },
+      {
+        "from": "server-runtime/",
+        "to": "server-runtime/"
       }
     ]
   },
