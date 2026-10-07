@@ -1,7 +1,7 @@
 {
   "name": "stremdbc-client",
-  "version": "1.0.0",
-  "description": "STREMDBC Full-Feature GUI Client for Windows",
+  "version": "1.1.0",
+  "description": "StreamDBC Windows Control Panel with Samsung F5500 builder and streaming management",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -49,16 +49,12 @@
           "target": "portable",
           "arch": "x64"
         }
-      ],
-      "icon": "client-icon.ico"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon": "client-icon.ico",
-      "uninstallerIcon": "client-icon.ico",
-      "installerHeaderIcon": "client-icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
