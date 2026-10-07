@@ -5,6 +5,7 @@ const https = require('https');
 const http = require('http');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
+const os = require('os');
 
 let mainWindow = null;
 let tray = null;
@@ -15,11 +16,14 @@ let settings = {
   notifications: true,
   minimizeToTray: true,
   serverUrlSaved: false,
-  workspacePath: ''
+  workspacePath: '',
+  cloudflareHostname: 'ztv.zeaz.dev',
+  cloudflareAutoUpdate: false
 };
 
 const STREAMDBC_SERVER_PORT = 1935;
 let apiKey = '';
+let cloudflareToken = '';
 let serverProcess = null;
 let serverRuntimeLastError = '';
 
@@ -34,6 +38,35 @@ function getCredentialPath() {
 
 function getRuntimeSecretPath() {
   return path.join(app.getPath('userData'), 'runtime-secret.json');
+}
+
+function getCloudflareCredentialPath() {
+  return path.join(app.getPath('userData'), 'cloudflare-credentials.json');
+}
+
+function loadCloudflareToken() {
+  try {
+    if (!safeStorage.isEncryptionAvailable() || !fs.existsSync(getCloudflareCredentialPath())) return '';
+    const payload = JSON.parse(fs.readFileSync(getCloudflareCredentialPath(), 'utf8'));
+    if (payload.version !== 1 || typeof payload.token !== 'string') return '';
+    return safeStorage.decryptString(Buffer.from(payload.token, 'base64'));
+  } catch {
+    console.error('Failed to load encrypted Cloudflare token');
+    return '';
+  }
+}
+
+function saveCloudflareToken(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    try { fs.rmSync(getCloudflareCredentialPath(), { force: true }); } catch {}
+    cloudflareToken = '';
+    return;
+  }
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('OS credential encryption is unavailable');
+  const encrypted = safeStorage.encryptString(normalized).toString('base64');
+  fs.writeFileSync(getCloudflareCredentialPath(), JSON.stringify({ version: 1, token: encrypted }), { mode: 0o600 });
+  cloudflareToken = normalized;
 }
 
 function getOrCreateRuntimeJWTSecret() {
@@ -57,7 +90,7 @@ function getOrCreateRuntimeJWTSecret() {
 }
 
 function publicSettings() {
-  return { ...settings, hasApiKey: Boolean(apiKey) };
+  return { ...settings, hasApiKey: Boolean(apiKey), hasCloudflareToken: Boolean(cloudflareToken) };
 }
 
 function loadAPIKey() {
@@ -114,6 +147,7 @@ function loadSettings() {
       settings = { ...settings, ...data };
     }
     if (!apiKey) apiKey = loadAPIKey();
+    if (!cloudflareToken) cloudflareToken = loadCloudflareToken();
   } catch {
     console.error('Failed to load settings');
   }
@@ -125,6 +159,127 @@ function saveSettings() {
   } catch {
     console.error('Failed to save settings');
   }
+}
+
+
+function isPrivateIPv4(address) {
+  const parts = String(address || '').split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  return parts[0] === 10 ||
+    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+    (parts[0] === 192 && parts[1] === 168);
+}
+
+function getLanIPv4() {
+  const candidates = [];
+  for (const [name, entries] of Object.entries(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry.family !== 'IPv4' || entry.internal || !isPrivateIPv4(entry.address)) continue;
+      const virtual = /loopback|wsl|hyper-v|virtualbox|vmware|docker|tailscale|teredo|vEthernet/i.test(name);
+      if (virtual) continue;
+      const wifi = /wi-?fi|wireless|wlan/i.test(name);
+      candidates.push({ name, address: entry.address, rank: wifi ? 0 : 1 });
+    }
+  }
+  candidates.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
+  return candidates[0] || null;
+}
+
+function deriveZoneName(hostname) {
+  const labels = String(hostname || '').toLowerCase().split('.').filter(Boolean);
+  if (labels.length < 2) throw new Error('Cloudflare hostname is invalid');
+  return labels.slice(-2).join('.');
+}
+
+function cloudflareRequest(method, route, body) {
+  return new Promise((resolve) => {
+    if (!cloudflareToken) {
+      resolve({ ok: false, error: 'Cloudflare API token is not configured.' });
+      return;
+    }
+    const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
+    const req = https.request({
+      protocol: 'https:',
+      hostname: 'api.cloudflare.com',
+      port: 443,
+      path: `/client/v4${route}`,
+      method,
+      headers: {
+        Authorization: `Bearer ${cloudflareToken}`,
+        Accept: 'application/json',
+        ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': String(payload.length) } : {})
+      },
+      timeout: 10000
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        let parsed;
+        try { parsed = JSON.parse(data); } catch { parsed = null; }
+        const success = res.statusCode >= 200 && res.statusCode < 300 && parsed?.success !== false;
+        resolve({ ok: success, statusCode: res.statusCode, body: parsed, error: success ? null : (parsed?.errors?.[0]?.message || 'Cloudflare API request failed') });
+      });
+    });
+    req.on('error', (err) => resolve({ ok: false, error: err.message }));
+    req.on('timeout', () => req.destroy(new Error('Cloudflare API request timed out')));
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+async function updateCloudflareLanDNS() {
+  const hostname = String(settings.cloudflareHostname || '').trim().toLowerCase();
+  if (!hostname) return { ok: false, error: 'Cloudflare hostname is not configured.' };
+  const lan = getLanIPv4();
+  if (!lan) return { ok: false, error: 'No physical private LAN IPv4 address was detected.' };
+  const zoneName = deriveZoneName(hostname);
+
+  const zones = await cloudflareRequest('GET', `/zones?name=${encodeURIComponent(zoneName)}&status=active&per_page=50`);
+  if (!zones.ok) return zones;
+  const zone = zones.body?.result?.find((item) => item.name === zoneName);
+  if (!zone?.id) return { ok: false, error: `Cloudflare zone not found: ${zoneName}` };
+
+  const records = await cloudflareRequest('GET', `/zones/${zone.id}/dns_records?type=A&name=${encodeURIComponent(hostname)}&per_page=100`);
+  if (!records.ok) return records;
+  const record = records.body?.result?.find((item) => item.type === 'A' && item.name === hostname);
+
+  let result;
+  if (record?.id) {
+    if (record.content === lan.address && record.proxied === false) {
+      return { ok: true, unchanged: true, hostname, address: lan.address, interface: lan.name, recordId: record.id };
+    }
+    result = await cloudflareRequest('PUT', `/zones/${zone.id}/dns_records/${record.id}`, {
+      type: 'A',
+      name: hostname,
+      content: lan.address,
+      ttl: 1,
+      proxied: false,
+      comment: 'Managed by StreamDBC Windows Control Panel'
+    });
+  } else {
+    result = await cloudflareRequest('POST', `/zones/${zone.id}/dns_records`, {
+      type: 'A',
+      name: hostname,
+      content: lan.address,
+      ttl: 1,
+      proxied: false,
+      comment: 'Managed by StreamDBC Windows Control Panel'
+    });
+  }
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    hostname,
+    address: lan.address,
+    interface: lan.name,
+    recordId: result.body?.result?.id || record?.id || ''
+  };
+}
+
+function localTVUrl(pathname = '/tv/') {
+  const lan = getLanIPv4();
+  const address = lan?.address || '127.0.0.1';
+  return `http://${address}:8081${pathname}`;
 }
 
 function createNotification(title, body) {
@@ -383,8 +538,7 @@ function openLocalControlPanel() {
 }
 
 function openLocalTVPage() {
-  const target = new URL('/tv/', settings.serverUrl).toString();
-  return shell.openExternal(target);
+  return shell.openExternal(localTVUrl('/tv/'));
 }
 
 function updateTrayMenu() {
@@ -761,11 +915,12 @@ async function samsungAction(serverUrl, action) {
 }
 
 function samsungPublicUrl(kind) {
+  const hostname = String(settings.cloudflareHostname || 'ztv.zeaz.dev').trim();
   const urls = {
-    tv: 'http://ztv.zeaz.dev:8081/tv/',
-    ping: 'http://ztv.zeaz.dev:8081/tv/ping',
-    hls: 'http://ztv.zeaz.dev:8081/tv/live/index.m3u8',
-    fallback: 'http://192.168.1.100:8081/tv/'
+    tv: `http://${hostname}:8081/tv/`,
+    ping: `http://${hostname}:8081/tv/ping`,
+    hls: `http://${hostname}:8081/tv/live/index.m3u8`,
+    fallback: localTVUrl('/tv/')
   };
   return urls[kind] || null;
 }
@@ -866,6 +1021,16 @@ app.whenReady().then(() => {
   createTray();
   createMenu();
 
+  if (settings.cloudflareAutoUpdate && cloudflareToken) {
+    updateCloudflareLanDNS().then((result) => {
+      if (!result.ok) {
+        console.error('Cloudflare LAN DNS update failed:', result.error || 'unknown error');
+      } else if (!result.unchanged) {
+        createNotification('StreamDBC DNS', `${result.hostname} → ${result.address}`);
+      }
+    });
+  }
+
   powerSaveBlocker.start('prevent-display-sleep');
 
   const serverUrl = settings.serverUrl;
@@ -907,10 +1072,13 @@ ipcMain.handle('get-settings', () => publicSettings());
 ipcMain.handle('save-settings', (event, newSettings) => {
   const next = { ...newSettings };
   const nextApiKey = typeof next.apiKey === 'string' ? next.apiKey.trim() : '';
+  const nextCloudflareToken = typeof next.cloudflareToken === 'string' ? next.cloudflareToken.trim() : '';
   delete next.apiKey;
+  delete next.cloudflareToken;
   if (next.serverUrl !== undefined) next.serverUrl = normalizeServerUrl(next.serverUrl);
   settings = { ...settings, ...next };
   if (nextApiKey) saveAPIKey(nextApiKey);
+  if (nextCloudflareToken) saveCloudflareToken(nextCloudflareToken);
   saveSettings();
   return publicSettings();
 });
@@ -967,6 +1135,15 @@ ipcMain.handle('open-local-dashboard', async () => {
 ipcMain.handle('open-local-tv', async () => {
   await openLocalTVPage();
   return true;
+});
+
+ipcMain.handle('get-lan-ip', () => {
+  const lan = getLanIPv4();
+  return lan ? { ok: true, ...lan, tvUrl: localTVUrl('/tv/') } : { ok: false, error: 'No LAN IPv4 detected.' };
+});
+
+ipcMain.handle('update-cloudflare-dns', async () => {
+  return await updateCloudflareLanDNS();
 });
 
 ipcMain.handle('samsung-action', async (event, { serverUrl, action }) => {
