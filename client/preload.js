@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   serverRuntimeAction: (action) => ipcRenderer.invoke('server-runtime-action', action),
   openLocalDashboard: () => ipcRenderer.invoke('open-local-dashboard'),
   openLocalTV: () => ipcRenderer.invoke('open-local-tv'),
+  getLanIP: () => ipcRenderer.invoke('get-lan-ip'),
+  updateCloudflareDNS: () => ipcRenderer.invoke('update-cloudflare-dns'),
   samsungAction: (data) => ipcRenderer.invoke('samsung-action', data),
   runSamsungTask: (task) => ipcRenderer.invoke('run-samsung-task', task),
   openSamsungUrl: (kind) => ipcRenderer.invoke('open-samsung-url', kind),
