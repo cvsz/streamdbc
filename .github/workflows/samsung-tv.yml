@@ -52,6 +52,20 @@ jobs:
           fi
           go mod tidy -diff
 
+      - name: Validate Samsung F5500 kiosk and Legacy launcher
+        shell: bash
+        run: |
+          grep -q 'http_port: 8081' configs/samsung-f5500.yaml
+          grep -q 'http://192.168.1.100:8081/tv/' client/samsung-f5500-legacy/index.html
+          grep -q '<fullwidget itemtype="boolean">y</fullwidget>' client/samsung-f5500-legacy/config.xml
+          grep -q 'src="/tv/live/index.m3u8"' web/tv/index.html
+          if grep -q '<video[^>]*controls' web/tv/index.html web/tv/basic.html; then
+            echo "Samsung kiosk pages must not expose browser video controls"
+            exit 1
+          fi
+          test -f client/samsung-f5500-legacy/widget.info
+          test -f scripts/windows/build-samsung-f5500-usb.ps1
+
       - name: Validate vMix starter preset vocabulary
         run: |
           python3 - << 'EOF'
