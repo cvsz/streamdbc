@@ -40,6 +40,7 @@ function build() {
 
   const dashboardSrc = path.join(CLIENT_DIR, '..', 'web', 'dashboard', 'index.html');
   const dashboardDest = path.join(CLIENT_DIR, 'assets', 'dashboard', 'index.html');
+  ensureDir(path.dirname(dashboardDest));
   if (fs.existsSync(dashboardSrc)) {
     copyFile(dashboardSrc, dashboardDest);
     console.log('✓ Dashboard copied');
@@ -47,6 +48,7 @@ function build() {
 
   const playerSrc = path.join(CLIENT_DIR, '..', 'web', 'player', 'index.html');
   const playerDest = path.join(CLIENT_DIR, 'assets', 'player', 'index.html');
+  ensureDir(path.dirname(playerDest));
   if (fs.existsSync(playerSrc)) {
     copyFile(playerSrc, playerDest);
     console.log('✓ Player copied');
