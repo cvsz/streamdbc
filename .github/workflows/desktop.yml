@@ -131,6 +131,16 @@ jobs:
           if (-not (Test-Path server-runtime/stremdbc.exe)) { throw "Bundled stremdbc.exe missing" }
           if (-not (Test-Path server-runtime/configs/samsung-f5500.yaml)) { throw "Samsung config missing" }
           if (-not (Test-Path server-runtime/web/tv/index.html)) { throw "TV web assets missing" }
+          if (-not (Test-Path server-runtime/ffmpeg/ffmpeg.exe)) { throw "Bundled ffmpeg.exe missing" }
+          if (-not (Test-Path server-runtime/ffmpeg/ffprobe.exe)) { throw "Bundled ffprobe.exe missing" }
+          if (-not (Test-Path server-runtime/scripts/windows/samsung-tv-doctor.ps1)) { throw "Bundled doctor script missing" }
+          $encoders = (& server-runtime/ffmpeg/ffmpeg.exe -hide_banner -encoders 2>&1 | Out-String)
+          $muxers = (& server-runtime/ffmpeg/ffmpeg.exe -hide_banner -muxers 2>&1 | Out-String)
+          $protocols = (& server-runtime/ffmpeg/ffmpeg.exe -hide_banner -protocols 2>&1 | Out-String)
+          if ($encoders -notmatch "libx264") { throw "Bundled FFmpeg missing libx264" }
+          if ($encoders -notmatch "(?m)^\s*[A-Z\.]{6}\s+aac\s") { throw "Bundled FFmpeg missing AAC encoder" }
+          if ($muxers -notmatch "(?m)^\s*[A-Z\.]{1,3}\s+hls\s") { throw "Bundled FFmpeg missing HLS muxer" }
+          if ($protocols -notmatch "(?m)^\s*rtmp\s*$") { throw "Bundled FFmpeg missing RTMP protocol" }
 
       - name: Upload Windows Control Panel
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
