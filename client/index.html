@@ -37,6 +37,7 @@
       <button class="nav-btn active" data-view="dashboard">Dashboard</button>
       <button class="nav-btn" data-view="streams">Streams</button>
       <button class="nav-btn" data-view="player">Player</button>
+      <button class="nav-btn" data-view="samsung">Samsung TV</button>
       <button class="nav-btn" data-view="settings">Settings</button>
     </nav>
 
@@ -152,6 +153,72 @@
         </div>
       </section>
 
+
+      <section class="view" id="samsungView">
+        <div class="section">
+          <div class="section-head">
+            <div>
+              <h2>Samsung F5500 Control Panel</h2>
+              <span class="muted">Windows builder + gateway operations · TCP 8081</span>
+            </div>
+            <button class="btn" id="samsungRefreshBtn">Refresh Status</button>
+          </div>
+
+          <div class="summary-grid samsung-summary">
+            <div class="summary-card"><div class="label">Gateway</div><div class="value small-value" id="tvState">—</div></div>
+            <div class="summary-card"><div class="label">Playlist</div><div class="value small-value" id="tvPlaylist">—</div></div>
+            <div class="summary-card"><div class="label">Profile</div><div class="value small-value" id="tvProfile">—</div></div>
+            <div class="summary-card"><div class="label">Port</div><div class="value small-value">8081</div></div>
+            <div class="summary-card"><div class="label">Target</div><div class="value small-value">F5500</div></div>
+          </div>
+
+          <div class="control-grid">
+            <div class="card control-card">
+              <div class="label">TV Gateway</div>
+              <h3>Runtime controls</h3>
+              <div class="button-grid">
+                <button class="btn btn-primary" data-tv-action="start">Start</button>
+                <button class="btn" data-tv-action="restart">Restart</button>
+                <button class="btn" data-tv-action="stop">Stop</button>
+                <button class="btn" data-builder-task="test">Smoke Test</button>
+              </div>
+            </div>
+
+            <div class="card control-card">
+              <div class="label">Windows Builder</div>
+              <h3>Local workspace</h3>
+              <div class="workspace-row">
+                <code id="workspacePath">Not selected</code>
+                <button class="btn" id="selectWorkspaceBtn">Select Repo</button>
+              </div>
+              <div class="button-grid">
+                <button class="btn btn-primary" data-builder-task="rebuild">Rebuild Server</button>
+                <button class="btn" data-builder-task="doctor">Doctor</button>
+                <button class="btn" data-builder-task="usb">Build USB Staging</button>
+              </div>
+              <p class="hint">Firewall changes still require an elevated Windows session.</p>
+            </div>
+
+            <div class="card control-card">
+              <div class="label">TV URLs</div>
+              <h3>Open endpoints</h3>
+              <div class="url-line"><code>http://ztv.zeaz.dev:8081/tv/</code><button class="btn btn-sm" data-tv-url="tv">Open</button></div>
+              <div class="url-line"><code>/tv/ping</code><button class="btn btn-sm" data-tv-url="ping">Ping</button></div>
+              <div class="url-line"><code>/tv/live/index.m3u8</code><button class="btn btn-sm" data-tv-url="hls">HLS</button></div>
+              <div class="url-line"><code>192.168.1.100:8081/tv/</code><button class="btn btn-sm" data-tv-url="fallback">Fallback</button></div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-head">
+              <h2>Builder Output</h2>
+              <button class="btn btn-sm" id="clearBuilderOutputBtn">Clear</button>
+            </div>
+            <pre class="builder-output" id="builderOutput">Ready.</pre>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="settingsView">
         <div class="section">
           <div class="section-head">
@@ -160,7 +227,7 @@
           <div class="settings-form">
             <div class="form-group">
               <label for="serverUrl">Server URL</label>
-              <input type="url" id="serverUrl" placeholder="http://localhost:8085">
+              <input type="url" id="serverUrl" placeholder="http://127.0.0.1:8081">
               <span class="hint">URL of your STREMDBC server</span>
             </div>
             <div class="form-group">
@@ -193,7 +260,7 @@
             <h2>About</h2>
           </div>
           <div class="about-card">
-            <p><strong>STREMDBC Client</strong> v1.0.0</p>
+            <p><strong>StreamDBC Windows Control Panel</strong> v1.1.0</p>
             <p>Streaming management control plane GUI client</p>
             <p>Connects to STREMDBC server for stream management, monitoring, and playback.</p>
             <div class="about-links">
