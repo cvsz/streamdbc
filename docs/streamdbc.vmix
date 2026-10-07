@@ -9,7 +9,7 @@
     * Leaves Recording, External output, Streaming, Playlist and MultiCorder
       STOPPED so nothing starts capturing or publishing on open.
 
-  What this file does NOT do (configure in vMix, see docs/SAMSUNG-F5500.md):
+  What this file does NOT do (configure in vMix / StreamDBC Single Control Panel, see docs/SAMSUNG-F5500.md and docs/SINGLE-CONTROL-PANEL.md):
     * External Output device ("vMix Video / Streaming"), frame rate and
       output size, and starting the External output itself. Those are vMix
       application/output settings: External cog -> Settings -> Output 1 ->
