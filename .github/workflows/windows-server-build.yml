@@ -1,0 +1,85 @@
+name: Windows Server Build
+
+on:
+  push:
+    branches: [main, "feat/**", "fix/**"]
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "configs/**"
+      - "web/**"
+      - "scripts/windows/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/windows-server-build.yml"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-server:
+    name: Build Windows stremdbc.exe
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify and test
+        shell: pwsh
+        run: |
+          go mod verify
+          go test ./...
+          go vet ./...
+
+      - name: Build Windows server
+        shell: pwsh
+        run: |
+          go build -trimpath -ldflags="-s -w" -o dist/stremdbc.exe ./cmd/stremdbc
+          if (-not (Test-Path dist/stremdbc.exe)) { throw "stremdbc.exe was not created" }
+          Get-FileHash -Algorithm SHA256 dist/stremdbc.exe | Format-List
+
+      - name: Stage Samsung F5500 server package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/package/configs | Out-Null
+          New-Item -ItemType Directory -Force -Path dist/package/web | Out-Null
+          New-Item -ItemType Directory -Force -Path dist/package/scripts/windows | Out-Null
+          Copy-Item dist/stremdbc.exe dist/package/stremdbc.exe
+          Copy-Item configs/samsung-f5500.yaml dist/package/configs/samsung-f5500.yaml
+          Copy-Item -Recurse web/tv dist/package/web/tv
+          Copy-Item scripts/windows/samsung-tv-*.ps1 dist/package/scripts/windows/
+          Copy-Item scripts/windows/samsung-vmix-setup.ps1 dist/package/scripts/windows/
+          Copy-Item scripts/windows/rebuild-samsung-server.ps1 dist/package/scripts/windows/
+          @"
+          StreamDBC Samsung F5500 Windows Server
+
+          Default TV URL:
+            http://192.168.1.100:8081/tv/
+
+          Start:
+            Set STREMDBC_JWT_SECRET and STREMDBC_API_KEY in PowerShell
+            .\scripts\windows\samsung-tv-doctor.ps1
+            .\scripts\windows\samsung-tv-start.ps1
+
+          Rebuild from source:
+            .\scripts\windows\rebuild-samsung-server.ps1
+          "@ | Set-Content -Encoding UTF8 dist/package/README-WINDOWS.txt
+
+      - name: Upload Windows server artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: streamdbc-windows-samsung-f5500
+          path: dist/package/
+          if-no-files-found: error
+          retention-days: 14
