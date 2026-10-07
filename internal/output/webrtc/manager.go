@@ -16,6 +16,27 @@ import (
 	"go.uber.org/zap"
 )
 
+const maxOutputLogValueRunes = 512
+
+func logSafeOutputValue(value string) string {
+	value = strings.ReplaceAll(value, "\r", "")
+	value = strings.ReplaceAll(value, "\n", "")
+	value = strings.ReplaceAll(value, "\u2028", "")
+	value = strings.ReplaceAll(value, "\u2029", "")
+	value = strings.ReplaceAll(value, "\t", " ")
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	runes := []rune(value)
+	if len(runes) > maxOutputLogValueRunes {
+		return string(runes[:maxOutputLogValueRunes]) + "…"
+	}
+	return value
+}
+
 var (
 	ErrOutputManagerStopped    = errors.New("WebRTC output manager is stopped")
 	ErrOutputManagerNotStarted = errors.New("WebRTC output manager is not started")
@@ -248,7 +269,11 @@ func (m *OutputManager) CreateViewerWithToken(streamID string, offer webrtc.Sess
 		_ = pc.Close()
 		return nil, webrtc.SessionDescription{}, fmt.Errorf("increment viewers: %w", err)
 	}
-	m.logger.Info("WHEP viewer connected", zap.String("stream_id", streamID), zap.String("session_id", session.ID), zap.String("remote", remoteAddr))
+	m.logger.Info("WHEP viewer connected",
+		zap.String("stream_id", streamID),
+		zap.String("session_id", session.ID),
+		zap.String("remote", logSafeOutputValue(remoteAddr)),
+	)
 	return viewerSnapshot(session), *local, nil
 }
 
@@ -262,7 +287,10 @@ func (m *OutputManager) RemoveViewer(streamID, sessionID string) error {
 		_ = session.PeerConn.Close()
 	}
 	_ = m.registry.DecrementViewers(streamID)
-	m.logger.Info("WHEP viewer disconnected", zap.String("stream_id", streamID), zap.String("session_id", sessionID))
+	m.logger.Info("WHEP viewer disconnected",
+		zap.String("stream_id", streamID),
+		zap.String("session_id", session.ID),
+	)
 	return nil
 }
 
