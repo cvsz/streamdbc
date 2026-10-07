@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
+const { spawn } = require('child_process');
 
 let mainWindow = null;
 let tray = null;
@@ -12,7 +13,8 @@ let settings = {
   autoStart: false,
   notifications: true,
   minimizeToTray: true,
-  serverUrlSaved: false
+  serverUrlSaved: false,
+  workspacePath: ''
 };
 
 const STREAMDBC_SERVER_PORT = 1935;
@@ -518,6 +520,114 @@ async function deleteStream(serverUrl, streamId) {
   }
 }
 
+function requestJson(method, serverUrl, route) {
+  serverUrl = normalizeServerUrl(serverUrl);
+  return new Promise((resolve) => {
+    const url = new URL(route, serverUrl);
+    const client = url.protocol === 'https:' ? https : http;
+    const req = client.request(url, {
+      method,
+      headers: {
+        'Accept': 'application/json',
+        ...(apiKey ? { 'X-API-Key': apiKey } : {})
+      },
+      timeout: 10000
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        let body = null;
+        try { body = data ? JSON.parse(data) : {}; } catch { body = { raw: data }; }
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve({ ok: true, statusCode: res.statusCode, body });
+        } else {
+          resolve({ ok: false, statusCode: res.statusCode, body });
+        }
+      });
+    });
+    req.on('error', (err) => resolve({ ok: false, error: err.message }));
+    req.on('timeout', () => req.destroy(new Error('request timed out')));
+    req.end();
+  });
+}
+
+async function fetchSamsungStatus(serverUrl) {
+  return requestJson('GET', serverUrl, '/api/v1/tv/status');
+}
+
+async function samsungAction(serverUrl, action) {
+  if (!['start', 'stop', 'restart'].includes(action)) {
+    return { ok: false, error: 'Unsupported Samsung action' };
+  }
+  return requestJson('POST', serverUrl, `/api/v1/tv/${action}`);
+}
+
+function samsungPublicUrl(kind) {
+  const urls = {
+    tv: 'http://ztv.zeaz.dev:8081/tv/',
+    ping: 'http://ztv.zeaz.dev:8081/tv/ping',
+    hls: 'http://ztv.zeaz.dev:8081/tv/live/index.m3u8',
+    fallback: 'http://192.168.1.100:8081/tv/'
+  };
+  return urls[kind] || null;
+}
+
+async function runSamsungWorkspaceTask(task) {
+  if (process.platform !== 'win32') {
+    return { ok: false, error: 'Windows builder tasks are available only on Windows.' };
+  }
+  const workspace = String(settings.workspacePath || '').trim();
+  if (!workspace) return { ok: false, error: 'Select the StreamDBC workspace first.' };
+
+  const allowed = {
+    doctor: { file: 'samsung-tv-doctor.ps1', args: ['-Port', '8081'] },
+    rebuild: { file: 'rebuild-samsung-server.ps1', args: ['-Port', '8081'] },
+    start: { file: 'samsung-tv-start.ps1', args: ['-Port', '8081'] },
+    stop: { file: 'samsung-tv-stop.ps1', args: ['-Port', '8081'] },
+    test: { file: 'samsung-tv-test.ps1', args: ['-Port', '8081'] },
+    usb: { file: 'build-samsung-f5500-usb.ps1', args: [] }
+  };
+  const spec = allowed[task];
+  if (!spec) return { ok: false, error: 'Unsupported builder task.' };
+
+  const scriptRoot = path.resolve(workspace, 'scripts', 'windows');
+  const scriptPath = path.resolve(scriptRoot, spec.file);
+  if (!scriptPath.startsWith(scriptRoot + path.sep) || !fs.existsSync(scriptPath)) {
+    return { ok: false, error: `Required script not found: ${scriptPath}` };
+  }
+
+  return new Promise((resolve) => {
+    const child = spawn('powershell.exe', [
+      '-NoProfile',
+      '-ExecutionPolicy', 'Bypass',
+      '-File', scriptPath,
+      ...spec.args
+    ], {
+      cwd: workspace,
+      windowsHide: true,
+      env: process.env
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const limit = 128 * 1024;
+    child.stdout.on('data', (chunk) => {
+      stdout = (stdout + chunk.toString()).slice(-limit);
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr = (stderr + chunk.toString()).slice(-limit);
+    });
+    child.on('error', (err) => resolve({ ok: false, error: err.message, stdout, stderr }));
+    child.on('close', (code) => resolve({
+      ok: code === 0,
+      exitCode: code,
+      stdout,
+      stderr,
+      error: code === 0 ? null : `Task exited with code ${code}`
+    }));
+  });
+}
+
 async function getAuthToken(serverUrl, streamId, action) {
   serverUrl = normalizeServerUrl(serverUrl);
   try {
@@ -621,6 +731,38 @@ ipcMain.handle('create-stream', async (event, { serverUrl, streamId, name }) => 
 
 ipcMain.handle('delete-stream', async (event, { serverUrl, streamId }) => {
   return await deleteStream(serverUrl || settings.serverUrl, streamId);
+});
+
+ipcMain.handle('select-workspace', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+  if (result.canceled || !result.filePaths[0]) return { canceled: true };
+  const workspacePath = path.resolve(result.filePaths[0]);
+  const expected = path.join(workspacePath, 'scripts', 'windows', 'rebuild-samsung-server.ps1');
+  if (!fs.existsSync(expected)) {
+    return { canceled: false, error: 'Selected folder is not a StreamDBC workspace.' };
+  }
+  settings.workspacePath = workspacePath;
+  saveSettings();
+  return { canceled: false, workspacePath };
+});
+
+ipcMain.handle('fetch-samsung-status', async (event, serverUrl) => {
+  return await fetchSamsungStatus(serverUrl || settings.serverUrl);
+});
+
+ipcMain.handle('samsung-action', async (event, { serverUrl, action }) => {
+  return await samsungAction(serverUrl || settings.serverUrl, action);
+});
+
+ipcMain.handle('run-samsung-task', async (event, task) => {
+  return await runSamsungWorkspaceTask(task);
+});
+
+ipcMain.handle('open-samsung-url', async (event, kind) => {
+  const target = samsungPublicUrl(kind);
+  if (!target) throw new Error('Unsupported Samsung URL');
+  await shell.openExternal(target);
+  return true;
 });
 
 ipcMain.handle('get-auth-token', async (event, { serverUrl, streamId, action }) => {
