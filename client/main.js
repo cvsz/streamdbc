@@ -6,6 +6,7 @@ const http = require('http');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const os = require('os');
+const { discoverFleet, getTVState, runTVAction } = require('./samsung-fleet');
 
 let mainWindow = null;
 let tray = null;
@@ -26,6 +27,7 @@ let apiKey = '';
 let cloudflareToken = '';
 let serverProcess = null;
 let serverRuntimeLastError = '';
+let samsungFleet = [];
 
 
 function getSettingsPath() {
@@ -1271,6 +1273,59 @@ ipcMain.handle('get-lan-ip', () => {
 
 ipcMain.handle('update-cloudflare-dns', async () => {
   return await updateCloudflareLanDNS();
+});
+
+ipcMain.handle('samsung-fleet-discover', async () => {
+  const lan = getLanIPv4();
+  if (!lan?.address) return { ok: false, error: 'No physical private LAN IPv4 address was detected.', tvs: [] };
+  try {
+    samsungFleet = await discoverFleet(lan.address);
+    return { ok: true, localIP: lan.address, interface: lan.name, tvs: samsungFleet };
+  } catch (err) {
+    return { ok: false, error: err.message, tvs: [] };
+  }
+});
+
+ipcMain.handle('samsung-fleet-list', async () => ({
+  ok: true,
+  tvs: samsungFleet
+}));
+
+ipcMain.handle('samsung-fleet-status', async () => {
+  const states = [];
+  for (const tv of samsungFleet) {
+    try {
+      states.push(await getTVState(tv));
+    } catch (err) {
+      states.push({ ip: tv.ip, transport: '', volume: null, muted: null, errors: [err.message] });
+    }
+  }
+  return { ok: true, states };
+});
+
+ipcMain.handle('samsung-fleet-action', async (event, data) => {
+  const ip = String(data?.ip || '').trim();
+  const tv = samsungFleet.find((item) => item.ip === ip);
+  if (!tv) return { ok: false, error: 'TV is not in the current discovered Samsung fleet.' };
+  try {
+    const result = await runTVAction(tv, data?.action, data?.value);
+    return { ...result, state: await getTVState(tv) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('samsung-fleet-action-all', async (event, data) => {
+  const results = [];
+  for (const tv of samsungFleet) {
+    try {
+      const result = await runTVAction(tv, data?.action, data?.value);
+      results.push({ ip: tv.ip, ...result });
+    } catch (err) {
+      results.push({ ip: tv.ip, ok: false, error: err.message });
+    }
+  }
+  return { ok: results.length > 0 && results.every((item) => item.ok), results };
 });
 
 ipcMain.handle('samsung-action', async (event, { serverUrl, action }) => {
