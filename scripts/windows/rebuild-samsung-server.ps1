@@ -64,8 +64,9 @@ try {
     }
 
     Write-Host ""
-    Write-Host "Server URL: http://192.168.1.100:$Port/tv/" -ForegroundColor Cyan
-    Write-Host "Health:     http://192.168.1.100:$Port/health" -ForegroundColor Cyan
+    Write-Host "Server URL: http://ztv.zeaz.dev:$Port/tv/" -ForegroundColor Cyan
+    Write-Host "LAN fallback: http://192.168.1.100:$Port/tv/" -ForegroundColor DarkCyan
+    Write-Host "Health:     http://ztv.zeaz.dev:$Port/health" -ForegroundColor Cyan
 } finally {
     Pop-Location
 }
