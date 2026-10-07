@@ -28,6 +28,7 @@ function applySettings() {
   $('apiKey').placeholder = settings.hasApiKey ? 'Stored securely — enter to replace' : 'Your API key';
   $('notifications').checked = settings.notifications !== false;
   $('minimizeToTray').checked = settings.minimizeToTray !== false;
+  if ($('workspacePath')) $('workspacePath').textContent = settings.workspacePath || 'Not selected';
 }
 
 async function refreshData() {
@@ -303,6 +304,49 @@ async function testConnection() {
   }
 }
 
+async function refreshSamsungStatus() {
+  const target = settings.serverUrl || 'http://127.0.0.1:8081';
+  const result = await API.fetchSamsungStatus(target);
+  if (!result || !result.ok) {
+    $('tvState').textContent = 'OFFLINE';
+    $('tvPlaylist').textContent = '—';
+    $('tvProfile').textContent = '—';
+    return;
+  }
+  const body = result.body || {};
+  $('tvState').textContent = String(body.state || 'unknown').toUpperCase();
+  $('tvPlaylist').textContent = body.playlist_ready ? 'READY' : 'WAIT';
+  $('tvProfile').textContent = body.profile || '—';
+}
+
+async function runTvAction(action) {
+  $('builderOutput').textContent = `Running TV action: ${action}...\n`;
+  const result = await API.samsungAction({ serverUrl: settings.serverUrl, action });
+  $('builderOutput').textContent += JSON.stringify(result, null, 2);
+  showToast(result?.ok ? `TV ${action} completed` : `TV ${action} failed`, result?.ok ? 'success' : 'error');
+  await refreshSamsungStatus();
+}
+
+async function runBuilderTask(task) {
+  $('builderOutput').textContent = `Running builder task: ${task}...\n`;
+  const result = await API.runSamsungTask(task);
+  const output = [result?.stdout, result?.stderr, result?.error].filter(Boolean).join('\n');
+  $('builderOutput').textContent += output || JSON.stringify(result, null, 2);
+  showToast(result?.ok ? `${task} completed` : `${task} failed`, result?.ok ? 'success' : 'error');
+  await refreshSamsungStatus();
+}
+
+async function selectWorkspace() {
+  const result = await API.selectWorkspace();
+  if (result?.workspacePath) {
+    settings.workspacePath = result.workspacePath;
+    $('workspacePath').textContent = result.workspacePath;
+    showToast('StreamDBC workspace selected', 'success');
+  } else if (result?.error) {
+    showToast(result.error, 'error');
+  }
+}
+
 function switchView(viewName) {
   currentView = viewName;
   document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -338,6 +382,7 @@ function init() {
   loadSettings().then(() => {
     refreshData();
     refreshInterval = setInterval(refreshData, 5000);
+    refreshSamsungStatus();
   });
 
   $('refreshBtn').addEventListener('click', refreshData);
@@ -382,6 +427,19 @@ function init() {
     if (streamId) {
       playStream(streamId);
     }
+  });
+
+  $('samsungRefreshBtn').addEventListener('click', refreshSamsungStatus);
+  $('selectWorkspaceBtn').addEventListener('click', selectWorkspace);
+  $('clearBuilderOutputBtn').addEventListener('click', () => { $('builderOutput').textContent = 'Ready.'; });
+  document.querySelectorAll('[data-tv-action]').forEach(btn => {
+    btn.addEventListener('click', () => runTvAction(btn.dataset.tvAction));
+  });
+  document.querySelectorAll('[data-builder-task]').forEach(btn => {
+    btn.addEventListener('click', () => runBuilderTask(btn.dataset.builderTask));
+  });
+  document.querySelectorAll('[data-tv-url]').forEach(btn => {
+    btn.addEventListener('click', () => API.openSamsungUrl(btn.dataset.tvUrl));
   });
 
   $('copyRtmpBtn').addEventListener('click', copyRtmpUrl);
