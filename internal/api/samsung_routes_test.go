@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -23,20 +24,18 @@ func newSamsungTestServer(t *testing.T, enableGateway bool) *Server {
 	cfg.Enable = enableGateway
 	cfg.OutputPath = t.TempDir()
 	if enableGateway {
-		// The manager is never started; the executable only needs to
-		// resolve so the /tv/live routes are registered.
-		name := "fake-ffmpeg"
-		contents := "#!/bin/sh\nexit 0\n"
+		// The manager is never started; it only needs a resolvable executable
+		// so /tv/live routes can be registered during the test.
 		if runtime.GOOS == "windows" {
-			name = "fake-ffmpeg.cmd"
-			contents = "@echo off\r\nexit /b 0\r\n"
+			cmd, err := exec.LookPath("cmd.exe")
+			if err != nil { t.Fatal(err) }
+			cfg.FFmpegPath = cmd
+		} else {
+			fake := filepath.Join(t.TempDir(), "fake-ffmpeg")
+			if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil { t.Fatal(err) }
+			cfg.FFmpegPath = fake
 		}
-		fake := filepath.Join(t.TempDir(), name)
-		if err := os.WriteFile(fake, []byte(contents), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		cfg.FFmpegPath = fake
-	}
+
 	manager, err := samsunggateway.NewManager(&cfg, nil)
 	if err != nil {
 		t.Fatalf("create Samsung gateway: %v", err)
