@@ -1,9 +1,11 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, dialog, shell, powerSaveBlocker, safeStorage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, dialog, shell, powerSaveBlocker, safeStorage, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const http = require('http');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
+const os = require('os');
 
 let mainWindow = null;
 let tray = null;
@@ -14,11 +16,17 @@ let settings = {
   notifications: true,
   minimizeToTray: true,
   serverUrlSaved: false,
-  workspacePath: ''
+  workspacePath: '',
+  cloudflareHostname: 'ztv.zeaz.dev',
+  cloudflareAutoUpdate: false
 };
 
 const STREAMDBC_SERVER_PORT = 1935;
 let apiKey = '';
+let cloudflareToken = '';
+let serverProcess = null;
+let serverRuntimeLastError = '';
+
 
 function getSettingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -28,8 +36,61 @@ function getCredentialPath() {
   return path.join(app.getPath('userData'), 'credentials.json');
 }
 
+function getRuntimeSecretPath() {
+  return path.join(app.getPath('userData'), 'runtime-secret.json');
+}
+
+function getCloudflareCredentialPath() {
+  return path.join(app.getPath('userData'), 'cloudflare-credentials.json');
+}
+
+function loadCloudflareToken() {
+  try {
+    if (!safeStorage.isEncryptionAvailable() || !fs.existsSync(getCloudflareCredentialPath())) return '';
+    const payload = JSON.parse(fs.readFileSync(getCloudflareCredentialPath(), 'utf8'));
+    if (payload.version !== 1 || typeof payload.token !== 'string') return '';
+    return safeStorage.decryptString(Buffer.from(payload.token, 'base64'));
+  } catch {
+    console.error('Failed to load encrypted Cloudflare token');
+    return '';
+  }
+}
+
+function saveCloudflareToken(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    try { fs.rmSync(getCloudflareCredentialPath(), { force: true }); } catch {}
+    cloudflareToken = '';
+    return;
+  }
+  if (!safeStorage.isEncryptionAvailable()) throw new Error('OS credential encryption is unavailable');
+  const encrypted = safeStorage.encryptString(normalized).toString('base64');
+  fs.writeFileSync(getCloudflareCredentialPath(), JSON.stringify({ version: 1, token: encrypted }), { mode: 0o600 });
+  cloudflareToken = normalized;
+}
+
+function getOrCreateRuntimeJWTSecret() {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Windows credential encryption is unavailable');
+  }
+  try {
+    if (fs.existsSync(getRuntimeSecretPath())) {
+      const payload = JSON.parse(fs.readFileSync(getRuntimeSecretPath(), 'utf8'));
+      if (payload.version === 1 && typeof payload.secret === 'string') {
+        return safeStorage.decryptString(Buffer.from(payload.secret, 'base64'));
+      }
+    }
+  } catch {
+    console.error('Failed to load runtime JWT secret; generating a replacement');
+  }
+  const secret = crypto.randomBytes(48).toString('base64url');
+  const encrypted = safeStorage.encryptString(secret).toString('base64');
+  fs.writeFileSync(getRuntimeSecretPath(), JSON.stringify({ version: 1, secret: encrypted }), { mode: 0o600 });
+  return secret;
+}
+
 function publicSettings() {
-  return { ...settings, hasApiKey: Boolean(apiKey) };
+  return { ...settings, hasApiKey: Boolean(apiKey), hasCloudflareToken: Boolean(cloudflareToken) };
 }
 
 function loadAPIKey() {
@@ -86,6 +147,7 @@ function loadSettings() {
       settings = { ...settings, ...data };
     }
     if (!apiKey) apiKey = loadAPIKey();
+    if (!cloudflareToken) cloudflareToken = loadCloudflareToken();
   } catch {
     console.error('Failed to load settings');
   }
@@ -97,6 +159,139 @@ function saveSettings() {
   } catch {
     console.error('Failed to save settings');
   }
+}
+
+
+function isPrivateIPv4(address) {
+  const parts = String(address || '').split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  return parts[0] === 10 ||
+    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+    (parts[0] === 192 && parts[1] === 168);
+}
+
+function getLanIPv4() {
+  const candidates = [];
+  for (const [name, entries] of Object.entries(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (entry.family !== 'IPv4' || entry.internal || !isPrivateIPv4(entry.address)) continue;
+      const virtual = /loopback|wsl|hyper-v|virtualbox|vmware|docker|tailscale|teredo|vEthernet/i.test(name);
+      if (virtual) continue;
+      const wifi = /wi-?fi|wireless|wlan/i.test(name);
+      candidates.push({ name, address: entry.address, rank: wifi ? 0 : 1 });
+    }
+  }
+  candidates.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
+  return candidates[0] || null;
+}
+
+function normalizeCloudflareHostname(value) {
+  const hostname = String(value || '').trim().toLowerCase();
+  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(hostname)) {
+    throw new Error('Cloudflare hostname is invalid');
+  }
+  return hostname;
+}
+
+function deriveZoneName(hostname) {
+  const normalized = normalizeCloudflareHostname(hostname);
+  const labels = normalized.split('.');
+  return labels.slice(-2).join('.');
+}
+
+function cloudflareRequest(method, route, body) {
+  return new Promise((resolve) => {
+    if (!cloudflareToken) {
+      resolve({ ok: false, error: 'Cloudflare API token is not configured.' });
+      return;
+    }
+    const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
+    const req = https.request({
+      protocol: 'https:',
+      hostname: 'api.cloudflare.com',
+      port: 443,
+      path: `/client/v4${route}`,
+      method,
+      headers: {
+        Authorization: `Bearer ${cloudflareToken}`,
+        Accept: 'application/json',
+        ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': String(payload.length) } : {})
+      },
+      timeout: 10000
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        let parsed;
+        try { parsed = JSON.parse(data); } catch { parsed = null; }
+        const success = res.statusCode >= 200 && res.statusCode < 300 && parsed?.success !== false;
+        resolve({ ok: success, statusCode: res.statusCode, body: parsed, error: success ? null : (parsed?.errors?.[0]?.message || 'Cloudflare API request failed') });
+      });
+    });
+    req.on('error', (err) => resolve({ ok: false, error: err.message }));
+    req.on('timeout', () => req.destroy(new Error('Cloudflare API request timed out')));
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+async function updateCloudflareLanDNS() {
+  let hostname;
+  try {
+    hostname = normalizeCloudflareHostname(settings.cloudflareHostname || '');
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+  const lan = getLanIPv4();
+  if (!lan) return { ok: false, error: 'No physical private LAN IPv4 address was detected.' };
+  const zoneName = deriveZoneName(hostname);
+
+  const zones = await cloudflareRequest('GET', `/zones?name=${encodeURIComponent(zoneName)}&status=active&per_page=50`);
+  if (!zones.ok) return zones;
+  const zone = zones.body?.result?.find((item) => item.name === zoneName);
+  if (!zone?.id) return { ok: false, error: `Cloudflare zone not found: ${zoneName}` };
+
+  const records = await cloudflareRequest('GET', `/zones/${zone.id}/dns_records?type=A&name=${encodeURIComponent(hostname)}&per_page=100`);
+  if (!records.ok) return records;
+  const record = records.body?.result?.find((item) => item.type === 'A' && item.name === hostname);
+
+  let result;
+  if (record?.id) {
+    if (record.content === lan.address && record.proxied === false) {
+      return { ok: true, unchanged: true, hostname, address: lan.address, interface: lan.name, recordId: record.id };
+    }
+    result = await cloudflareRequest('PUT', `/zones/${zone.id}/dns_records/${record.id}`, {
+      type: 'A',
+      name: hostname,
+      content: lan.address,
+      ttl: 1,
+      proxied: false,
+      comment: 'Managed by StreamDBC Windows Control Panel'
+    });
+  } else {
+    result = await cloudflareRequest('POST', `/zones/${zone.id}/dns_records`, {
+      type: 'A',
+      name: hostname,
+      content: lan.address,
+      ttl: 1,
+      proxied: false,
+      comment: 'Managed by StreamDBC Windows Control Panel'
+    });
+  }
+  if (!result.ok) return result;
+  return {
+    ok: true,
+    hostname,
+    address: lan.address,
+    interface: lan.name,
+    recordId: result.body?.result?.id || record?.id || ''
+  };
+}
+
+function localTVUrl(pathname = '/tv/') {
+  const lan = getLanIPv4();
+  const address = lan?.address || '127.0.0.1';
+  return `http://${address}:8081${pathname}`;
 }
 
 function createNotification(title, body) {
@@ -116,7 +311,7 @@ function createMainWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'STREMDBC Client',
+    title: 'StreamDBC Control Panel',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -190,48 +385,217 @@ function createPlayerWindow(streamId) {
   });
 }
 
-function createTray() {
-  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
-  if (!fs.existsSync(iconPath)) {
-    return;
+
+function resolveServerRuntime() {
+  const candidates = [];
+  if (app.isPackaged) {
+    candidates.push({
+      source: 'bundled',
+      executable: path.join(process.resourcesPath, 'server-runtime', 'stremdbc.exe'),
+      config: path.join(process.resourcesPath, 'server-runtime', 'configs', 'samsung-f5500.yaml'),
+      cwd: path.join(process.resourcesPath, 'server-runtime')
+    });
+  }
+  const workspace = String(settings.workspacePath || '').trim();
+  if (workspace) {
+    candidates.push({
+      source: 'workspace',
+      executable: path.join(workspace, 'stremdbc.exe'),
+      config: path.join(workspace, 'configs', 'samsung-f5500.yaml'),
+      cwd: workspace
+    });
+  }
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    const installed = path.join(process.env.LOCALAPPDATA, 'StreamDBC');
+    candidates.push({
+      source: 'localappdata',
+      executable: path.join(installed, 'stremdbc.exe'),
+      config: workspace ? path.join(workspace, 'configs', 'samsung-f5500.yaml') : '',
+      cwd: installed
+    });
+  }
+  return candidates.find((candidate) =>
+    fs.existsSync(candidate.executable) &&
+    candidate.config &&
+    fs.existsSync(candidate.config)
+  ) || null;
+}
+
+async function getServerRuntimeStatus() {
+  const health = await requestJson('GET', settings.serverUrl, '/health');
+  const runtime = resolveServerRuntime();
+  const managedPid = serverProcess && !serverProcess.killed ? serverProcess.pid : null;
+  return {
+    running: Boolean(health && health.ok && health.body?.status === 'healthy'),
+    managedPid,
+    executable: runtime?.executable || '',
+    config: runtime?.config || '',
+    source: runtime?.source || '',
+    lastError: serverRuntimeLastError
+  };
+}
+
+async function waitForServerHealth(timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const health = await requestJson('GET', settings.serverUrl, '/health');
+    if (health?.ok && health.body?.status === 'healthy') return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+async function startServerRuntime() {
+  if (process.platform !== 'win32') return { ok: false, error: 'Server runtime control is Windows-only.' };
+  const current = await getServerRuntimeStatus();
+  if (current.running) return { ok: true, alreadyRunning: true, status: current };
+
+  const runtime = resolveServerRuntime();
+  if (!runtime) {
+    return { ok: false, error: 'No usable stremdbc.exe + samsung-f5500.yaml runtime was found. Select the repository or install the bundled Control Panel build.' };
   }
 
-  tray = new Tray(iconPath);
+  let jwtSecret;
+  try {
+    jwtSecret = process.env.STREMDBC_JWT_SECRET || getOrCreateRuntimeJWTSecret();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+  const runtimeApiKey = apiKey || process.env.STREMDBC_API_KEY || '';
+  if (!runtimeApiKey) {
+    return { ok: false, error: 'Set the API key in Settings before starting the bundled StreamDBC server.' };
+  }
+
+  serverRuntimeLastError = '';
+  serverProcess = spawn(runtime.executable, ['-config', runtime.config], {
+    cwd: runtime.cwd,
+    windowsHide: true,
+    detached: false,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      STREMDBC_JWT_SECRET: jwtSecret,
+      STREMDBC_API_KEY: runtimeApiKey
+    }
+  });
+  serverProcess.once('error', (err) => {
+    serverRuntimeLastError = err.message;
+    serverProcess = null;
+    updateTrayMenu();
+  });
+  serverProcess.once('exit', (code, signal) => {
+    if (code && code !== 0) serverRuntimeLastError = `stremdbc.exe exited with code ${code}`;
+    if (signal) serverRuntimeLastError = `stremdbc.exe exited after signal ${signal}`;
+    serverProcess = null;
+    updateTrayMenu();
+  });
+
+  const healthy = await waitForServerHealth();
+  updateTrayMenu();
+  if (!healthy) {
+    return { ok: false, error: serverRuntimeLastError || 'StreamDBC server did not become healthy before timeout.' };
+  }
+  createNotification('StreamDBC', 'Server is running on port 8081');
+  return { ok: true, status: await getServerRuntimeStatus() };
+}
+
+async function stopServerRuntime() {
+  const health = await requestJson('GET', settings.serverUrl, '/health');
+  if (!health?.ok) {
+    if (serverProcess && !serverProcess.killed) {
+      try { serverProcess.kill(); } catch {}
+      serverProcess = null;
+    }
+    updateTrayMenu();
+    return { ok: true, alreadyStopped: true, status: await getServerRuntimeStatus() };
+  }
+
+  if (serverProcess && !serverProcess.killed) {
+    try {
+      serverProcess.kill();
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+    serverProcess = null;
+  } else {
+    const workspace = String(settings.workspacePath || '').trim();
+    if (workspace) {
+      const scriptPath = path.join(workspace, 'scripts', 'windows', 'samsung-tv-stop.ps1');
+      if (fs.existsSync(scriptPath)) {
+        await runSamsungWorkspaceTask('stop');
+      }
+    }
+    return { ok: false, error: 'Server is running but was not launched by this Control Panel. Stop that process from its owning session or select the StreamDBC workspace.' };
+  }
+
+  updateTrayMenu();
+  return { ok: true, status: await getServerRuntimeStatus() };
+}
+
+async function restartServerRuntime() {
+  const status = await getServerRuntimeStatus();
+  if (status.running && status.managedPid) {
+    const stopped = await stopServerRuntime();
+    if (!stopped.ok) return stopped;
+    await new Promise((resolve) => setTimeout(resolve, 750));
+  } else if (status.running) {
+    return { ok: false, error: 'The running StreamDBC server is not managed by this Control Panel. Stop it first, then use Start Server.' };
+  }
+  return startServerRuntime();
+}
+
+function openLocalControlPanel() {
+  const target = new URL('/dashboard/', settings.serverUrl).toString();
+  return shell.openExternal(target);
+}
+
+function openLocalTVPage() {
+  return shell.openExternal(localTVUrl('/tv/'));
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const running = Boolean(serverProcess && !serverProcess.killed);
   const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Open Dashboard',
-      click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-        }
-      }
-    },
+    { label: 'Open StreamDBC Control Panel', click: () => { mainWindow?.show(); mainWindow?.focus(); } },
+    { label: 'Open Web Dashboard', click: () => { void openLocalControlPanel(); } },
+    { label: 'Open Samsung TV Page', click: () => { void openLocalTVPage(); } },
+    { type: 'separator' },
+    { label: running ? 'Server Running' : 'Start Server', enabled: !running, click: () => { void startServerRuntime(); } },
+    { label: 'Restart Server', click: () => { void restartServerRuntime(); } },
+    { label: 'Stop Server', enabled: running, click: () => { void stopServerRuntime(); } },
+    { type: 'separator' },
+    { label: 'Settings', click: () => { mainWindow?.show(); mainWindow?.webContents.send('open-settings'); } },
     { type: 'separator' },
     {
-      label: 'Settings',
-      click: () => {
-        mainWindow?.webContents.send('open-settings');
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Check for Updates',
-      click: () => {
-        mainWindow?.webContents.send('check-updates');
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit',
+      label: 'Quit Control Panel',
       click: () => {
         app.isQuitting = true;
         app.quit();
       }
     }
   ]);
-
-  tray.setToolTip('STREMDBC Client');
   tray.setContextMenu(contextMenu);
+}
+
+function createTray() {
+  const pngPath = path.join(__dirname, 'assets', 'tray-icon.png');
+  const svgPath = path.join(__dirname, 'assets', 'tray-icon.svg');
+  let trayImage = null;
+  if (fs.existsSync(pngPath)) {
+    trayImage = nativeImage.createFromPath(pngPath);
+  } else if (fs.existsSync(svgPath)) {
+    const svg = fs.readFileSync(svgPath);
+    trayImage = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${svg.toString('base64')}`);
+  }
+  if (!trayImage || trayImage.isEmpty()) {
+    console.error('System tray icon is unavailable');
+    return;
+  }
+
+  tray = new Tray(trayImage.resize({ width: 16, height: 16 }));
+  tray.setToolTip('StreamDBC Server & Control Panel');
+  updateTrayMenu();
 
   tray.on('click', () => {
     if (mainWindow) {
@@ -255,7 +619,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
               title: 'About STREMDBC Client',
-              message: 'STREMDBC Client v1.0.0',
+              message: `StreamDBC Control Panel v${app.getVersion()}`,
               detail: 'Streaming management control plane GUI client\n\nConnects to STREMDBC server for stream management, monitoring, and playback.'
             });
           }
@@ -348,7 +712,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
               title: 'About',
-              message: 'STREMDBC Client v1.0.0'
+              message: `StreamDBC Control Panel v${app.getVersion()}`
             });
           }
         }
@@ -563,11 +927,13 @@ async function samsungAction(serverUrl, action) {
 }
 
 function samsungPublicUrl(kind) {
+  let hostname = 'ztv.zeaz.dev';
+  try { hostname = normalizeCloudflareHostname(settings.cloudflareHostname || hostname); } catch {}
   const urls = {
-    tv: 'http://ztv.zeaz.dev:8081/tv/',
-    ping: 'http://ztv.zeaz.dev:8081/tv/ping',
-    hls: 'http://ztv.zeaz.dev:8081/tv/live/index.m3u8',
-    fallback: 'http://192.168.1.100:8081/tv/'
+    tv: `http://${hostname}:8081/tv/`,
+    ping: `http://${hostname}:8081/tv/ping`,
+    hls: `http://${hostname}:8081/tv/live/index.m3u8`,
+    fallback: localTVUrl('/tv/')
   };
   return urls[kind] || null;
 }
@@ -661,12 +1027,22 @@ async function getAuthToken(serverUrl, streamId, action) {
 
 app.whenReady().then(() => {
   loadSettings();
-  app.setName('STREMDBC Client');
+  app.setName('StreamDBC Control Panel');
   app.setAppUserModelId('com.stremdbc.client');
 
   createMainWindow();
   createTray();
   createMenu();
+
+  if (settings.cloudflareAutoUpdate && cloudflareToken) {
+    updateCloudflareLanDNS().then((result) => {
+      if (!result.ok) {
+        console.error('Cloudflare LAN DNS update failed:', result.error || 'unknown error');
+      } else if (!result.unchanged) {
+        createNotification('StreamDBC DNS', `${result.hostname} → ${result.address}`);
+      }
+    });
+  }
 
   powerSaveBlocker.start('prevent-display-sleep');
 
@@ -709,10 +1085,13 @@ ipcMain.handle('get-settings', () => publicSettings());
 ipcMain.handle('save-settings', (event, newSettings) => {
   const next = { ...newSettings };
   const nextApiKey = typeof next.apiKey === 'string' ? next.apiKey.trim() : '';
+  const nextCloudflareToken = typeof next.cloudflareToken === 'string' ? next.cloudflareToken.trim() : '';
   delete next.apiKey;
+  delete next.cloudflareToken;
   if (next.serverUrl !== undefined) next.serverUrl = normalizeServerUrl(next.serverUrl);
   settings = { ...settings, ...next };
   if (nextApiKey) saveAPIKey(nextApiKey);
+  if (nextCloudflareToken) saveCloudflareToken(nextCloudflareToken);
   saveSettings();
   return publicSettings();
 });
@@ -748,6 +1127,36 @@ ipcMain.handle('select-workspace', async () => {
 
 ipcMain.handle('fetch-samsung-status', async (event, serverUrl) => {
   return await fetchSamsungStatus(serverUrl || settings.serverUrl);
+});
+
+ipcMain.handle('get-server-runtime-status', async () => {
+  return await getServerRuntimeStatus();
+});
+
+ipcMain.handle('server-runtime-action', async (event, action) => {
+  if (action === 'start') return await startServerRuntime();
+  if (action === 'stop') return await stopServerRuntime();
+  if (action === 'restart') return await restartServerRuntime();
+  return { ok: false, error: 'Unsupported server runtime action.' };
+});
+
+ipcMain.handle('open-local-dashboard', async () => {
+  await openLocalControlPanel();
+  return true;
+});
+
+ipcMain.handle('open-local-tv', async () => {
+  await openLocalTVPage();
+  return true;
+});
+
+ipcMain.handle('get-lan-ip', () => {
+  const lan = getLanIPv4();
+  return lan ? { ok: true, ...lan, tvUrl: localTVUrl('/tv/') } : { ok: false, error: 'No LAN IPv4 detected.' };
+});
+
+ipcMain.handle('update-cloudflare-dns', async () => {
+  return await updateCloudflareLanDNS();
 });
 
 ipcMain.handle('samsung-action', async (event, { serverUrl, action }) => {

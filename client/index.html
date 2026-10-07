@@ -174,6 +174,25 @@
 
           <div class="control-grid">
             <div class="card control-card">
+              <div class="label">StreamDBC Server</div>
+              <h3>Windows runtime + System Tray</h3>
+              <div class="summary-grid samsung-summary">
+                <div class="summary-card"><div class="label">Server</div><div class="value small-value" id="runtimeState">—</div></div>
+                <div class="summary-card"><div class="label">Source</div><div class="value small-value" id="runtimeSource">—</div></div>
+                <div class="summary-card"><div class="label">PID</div><div class="value small-value" id="runtimePid">—</div></div>
+              </div>
+              <div class="workspace-row"><code id="runtimeExecutable">Not found</code></div>
+              <div class="button-grid">
+                <button class="btn btn-primary" data-server-action="start">Start Server</button>
+                <button class="btn" data-server-action="restart">Restart Server</button>
+                <button class="btn" data-server-action="stop">Stop Server</button>
+                <button class="btn" id="openLocalDashboardBtn">Web Dashboard</button>
+                <button class="btn" id="openLocalTVBtn">TV Page</button>
+              </div>
+              <p class="hint">Closing the window keeps the Control Panel in the Windows System Tray. Tray actions can reopen the GUI and control the managed server.</p>
+            </div>
+
+            <div class="card control-card">
               <div class="label">TV Gateway</div>
               <h3>Runtime controls</h3>
               <div class="button-grid">
@@ -197,6 +216,19 @@
                 <button class="btn" data-builder-task="usb">Build USB Staging</button>
               </div>
               <p class="hint">Firewall changes still require an elevated Windows session.</p>
+            </div>
+
+            <div class="card control-card">
+              <div class="label">LAN + Cloudflare DNS</div>
+              <h3>Automatic local address</h3>
+              <div class="url-line"><span>LAN IPv4</span><code id="lanAddress">—</code></div>
+              <div class="url-line"><span>Interface</span><code id="lanInterface">—</code></div>
+              <div class="url-line"><span>TV URL</span><code id="lanTvUrl">—</code></div>
+              <div class="button-grid">
+                <button class="btn" id="refreshLanBtn">Detect LAN IP</button>
+                <button class="btn btn-primary" id="updateCloudflareDnsBtn">Update Cloudflare DNS</button>
+              </div>
+              <p class="hint">Cloudflare record stays DNS-only and points to the current private LAN IPv4 for same-LAN clients.</p>
             </div>
 
             <div class="card control-card">
@@ -236,6 +268,22 @@
               <span class="hint">Required when authentication is enabled</span>
             </div>
             <div class="form-group">
+              <label for="cloudflareHostname">Cloudflare TV Hostname</label>
+              <input type="text" id="cloudflareHostname" placeholder="ztv.zeaz.dev" autocomplete="off">
+              <span class="hint">A record managed by the Control Panel. Recommended: DNS only.</span>
+            </div>
+            <div class="form-group">
+              <label for="cloudflareToken">Cloudflare API Token</label>
+              <input type="password" id="cloudflareToken" placeholder="Cloudflare API token" autocomplete="off">
+              <span class="hint">Stored encrypted with the OS credential store. Token needs Zone:Read and DNS:Edit for the target zone.</span>
+            </div>
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="cloudflareAutoUpdate">
+                Update Cloudflare DNS automatically when Control Panel starts
+              </label>
+            </div>
+            <div class="form-group">
               <label class="checkbox-label">
                 <input type="checkbox" id="notifications">
                 Enable Notifications
@@ -260,7 +308,7 @@
             <h2>About</h2>
           </div>
           <div class="about-card">
-            <p><strong>StreamDBC Windows Control Panel</strong> v1.1.0</p>
+            <p><strong>StreamDBC Windows Control Panel</strong> v1.2.0</p>
             <p>Streaming management control plane GUI client</p>
             <p>Connects to STREMDBC server for stream management, monitoring, and playback.</p>
             <div class="about-links">
