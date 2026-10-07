@@ -219,6 +219,19 @@
             </div>
 
             <div class="card control-card">
+              <div class="label">LAN + Cloudflare DNS</div>
+              <h3>Automatic local address</h3>
+              <div class="url-line"><span>LAN IPv4</span><code id="lanAddress">—</code></div>
+              <div class="url-line"><span>Interface</span><code id="lanInterface">—</code></div>
+              <div class="url-line"><span>TV URL</span><code id="lanTvUrl">—</code></div>
+              <div class="button-grid">
+                <button class="btn" id="refreshLanBtn">Detect LAN IP</button>
+                <button class="btn btn-primary" id="updateCloudflareDnsBtn">Update Cloudflare DNS</button>
+              </div>
+              <p class="hint">Cloudflare record stays DNS-only and points to the current private LAN IPv4 for same-LAN clients.</p>
+            </div>
+
+            <div class="card control-card">
               <div class="label">TV URLs</div>
               <h3>Open endpoints</h3>
               <div class="url-line"><code>http://ztv.zeaz.dev:8081/tv/</code><button class="btn btn-sm" data-tv-url="tv">Open</button></div>
@@ -253,6 +266,22 @@
               <label for="apiKey">API Key</label>
               <input type="password" id="apiKey" placeholder="Your API key">
               <span class="hint">Required when authentication is enabled</span>
+            </div>
+            <div class="form-group">
+              <label for="cloudflareHostname">Cloudflare TV Hostname</label>
+              <input type="text" id="cloudflareHostname" placeholder="ztv.zeaz.dev" autocomplete="off">
+              <span class="hint">A record managed by the Control Panel. Recommended: DNS only.</span>
+            </div>
+            <div class="form-group">
+              <label for="cloudflareToken">Cloudflare API Token</label>
+              <input type="password" id="cloudflareToken" placeholder="Cloudflare API token" autocomplete="off">
+              <span class="hint">Stored encrypted with the OS credential store. Token needs Zone:Read and DNS:Edit for the target zone.</span>
+            </div>
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" id="cloudflareAutoUpdate">
+                Update Cloudflare DNS automatically when Control Panel starts
+              </label>
             </div>
             <div class="form-group">
               <label class="checkbox-label">
