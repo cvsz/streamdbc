@@ -1057,7 +1057,15 @@ async function runSamsungWorkspaceTask(task) {
   }
   const ffmpeg = resolveFFmpegRuntime();
   const taskArgs = [...spec.args];
-  if (task === 'doctor' && ffmpeg) taskArgs.push('-FFmpegPath', ffmpeg.path);
+  if (task === 'doctor' && ffmpeg) {
+    taskArgs.push('-FFmpegPath', ffmpeg.path, '-RequireVMix');
+  }
+
+  let taskJWTSecret = process.env.STREMDBC_JWT_SECRET || '';
+  if (task === 'doctor' && !taskJWTSecret) {
+    try { taskJWTSecret = getOrCreateRuntimeJWTSecret(); } catch {}
+  }
+  const taskAPIKey = process.env.STREMDBC_API_KEY || apiKey || '';
 
   return new Promise((resolve) => {
     const child = spawn('powershell.exe', [
@@ -1068,7 +1076,12 @@ async function runSamsungWorkspaceTask(task) {
     ], {
       cwd: taskRoot,
       windowsHide: true,
-      env: process.env
+      env: {
+        ...process.env,
+        ...(taskJWTSecret ? { STREMDBC_JWT_SECRET: taskJWTSecret } : {}),
+        ...(taskAPIKey ? { STREMDBC_API_KEY: taskAPIKey } : {}),
+        ...(ffmpeg ? { STREMDBC_FFMPEG_PATH: ffmpeg.path, PATH: `${path.dirname(ffmpeg.path)}${path.delimiter}${process.env.PATH || ''}` } : {})
+      }
     });
 
     let stdout = '';
