@@ -174,6 +174,25 @@
 
           <div class="control-grid">
             <div class="card control-card">
+              <div class="label">StreamDBC Server</div>
+              <h3>Windows runtime + System Tray</h3>
+              <div class="summary-grid samsung-summary">
+                <div class="summary-card"><div class="label">Server</div><div class="value small-value" id="runtimeState">—</div></div>
+                <div class="summary-card"><div class="label">Source</div><div class="value small-value" id="runtimeSource">—</div></div>
+                <div class="summary-card"><div class="label">PID</div><div class="value small-value" id="runtimePid">—</div></div>
+              </div>
+              <div class="workspace-row"><code id="runtimeExecutable">Not found</code></div>
+              <div class="button-grid">
+                <button class="btn btn-primary" data-server-action="start">Start Server</button>
+                <button class="btn" data-server-action="restart">Restart Server</button>
+                <button class="btn" data-server-action="stop">Stop Server</button>
+                <button class="btn" id="openLocalDashboardBtn">Web Dashboard</button>
+                <button class="btn" id="openLocalTVBtn">TV Page</button>
+              </div>
+              <p class="hint">Closing the window keeps the Control Panel in the Windows System Tray. Tray actions can reopen the GUI and control the managed server.</p>
+            </div>
+
+            <div class="card control-card">
               <div class="label">TV Gateway</div>
               <h3>Runtime controls</h3>
               <div class="button-grid">
@@ -260,7 +279,7 @@
             <h2>About</h2>
           </div>
           <div class="about-card">
-            <p><strong>StreamDBC Windows Control Panel</strong> v1.1.0</p>
+            <p><strong>StreamDBC Windows Control Panel</strong> v1.2.0</p>
             <p>Streaming management control plane GUI client</p>
             <p>Connects to STREMDBC server for stream management, monitoring, and playback.</p>
             <div class="about-links">
