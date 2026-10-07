@@ -7,11 +7,14 @@ The launcher performs one task:
 
 ```text
 open app
-  -> http://192.168.1.100:8081/tv/
+  -> http://ztv.zeaz.dev:8081/tv/
   -> StreamDBC kiosk player
 ```
 
-The target URL is intentionally fixed for the deployed vMix/StreamDBC host.
+The launcher uses the stable LAN hostname `ztv.zeaz.dev`. It currently resolves to
+`192.168.1.100` via DNS. If the TV/router blocks public DNS names that resolve to
+private RFC1918 addresses, use split DNS on the LAN or temporarily fall back to
+`http://192.168.1.100:8081/tv/`.
 
 ## Files
 
