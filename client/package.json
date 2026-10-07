@@ -4,9 +4,9 @@
   "description": "StreamDBC single Windows Control Panel with bundled FFmpeg, Samsung F5500 fleet discovery/control, System Tray, gateway operations, and Cloudflare LAN DNS sync",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "npm run generate:icon && electron .",
     "build": "node build.js",
-    "build:win": "npm run vendor && npm run prepare-runtime && electron-builder --win nsis portable --publish never",
+    "build:win": "npm run generate:icon && npm run vendor && npm run prepare-runtime && electron-builder --win nsis portable --publish never",
     "dev": "electron . --enable-logging",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
@@ -14,7 +14,9 @@
     "prestart": "npm run vendor",
     "prepack": "npm run vendor",
     "predist": "npm run vendor && npm run prepare-runtime",
-    "prepare-runtime": "node scripts/prepare-server-runtime.js"
+    "prepare-runtime": "node scripts/prepare-server-runtime.js",
+    "generate:icon": "node scripts/generate-windows-icon.js",
+    "full-build-installer": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/windows/full-build-installer.ps1"
   },
   "dependencies": {
     "electron-updater": "^6.3.0",
@@ -51,17 +53,21 @@
           "target": "portable",
           "arch": "x64"
         }
-      ]
+      ],
+      "icon": "assets/apps.ico"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "installerIcon": "assets/apps.ico",
+      "uninstallerIcon": "assets/apps.ico",
+      "artifactName": "StreamDBC-Control-Panel-Setup-${version}.${ext}"
     },
     "portable": {
-      "artifactName": "stremdbc-client-setup.exe"
+      "artifactName": "StreamDBC-Control-Panel-Portable-${version}.${ext}"
     },
     "directories": {
       "output": "dist"
