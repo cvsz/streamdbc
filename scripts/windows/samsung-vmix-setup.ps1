@@ -4,7 +4,7 @@ param(
     [string]$ProgramInput = "1",
     [int]$TransitionMs = 500,
     [int]$MasterVolume = 100,
-    [int]$StreamDbcPort = 8080
+    [int]$StreamDbcPort = 8081
 )
 
 # Applies the Samsung F5500 vMix settings that the vMix API supports, then
