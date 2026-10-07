@@ -6,6 +6,9 @@ All notable StreamDBC changes are recorded here.
 
 ### Added
 
+- Zeazdev-branded Windows `apps.ico` generation and installer/application icon wiring.
+- `scripts/windows/full-build-installer.ps1` one-command Windows build, verification, SHA256 and build-manifest pipeline.
+
 - Windows Single Control Panel Samsung fleet section.
 - SSDP discovery bound to the active private LAN interface.
 - Dynamic Samsung device/service/SCPD discovery.
