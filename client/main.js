@@ -185,9 +185,17 @@ function getLanIPv4() {
   return candidates[0] || null;
 }
 
+function normalizeCloudflareHostname(value) {
+  const hostname = String(value || '').trim().toLowerCase();
+  if (!/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(hostname)) {
+    throw new Error('Cloudflare hostname is invalid');
+  }
+  return hostname;
+}
+
 function deriveZoneName(hostname) {
-  const labels = String(hostname || '').toLowerCase().split('.').filter(Boolean);
-  if (labels.length < 2) throw new Error('Cloudflare hostname is invalid');
+  const normalized = normalizeCloudflareHostname(hostname);
+  const labels = normalized.split('.');
   return labels.slice(-2).join('.');
 }
 
@@ -228,8 +236,12 @@ function cloudflareRequest(method, route, body) {
 }
 
 async function updateCloudflareLanDNS() {
-  const hostname = String(settings.cloudflareHostname || '').trim().toLowerCase();
-  if (!hostname) return { ok: false, error: 'Cloudflare hostname is not configured.' };
+  let hostname;
+  try {
+    hostname = normalizeCloudflareHostname(settings.cloudflareHostname || '');
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
   const lan = getLanIPv4();
   if (!lan) return { ok: false, error: 'No physical private LAN IPv4 address was detected.' };
   const zoneName = deriveZoneName(hostname);
@@ -299,7 +311,7 @@ function createMainWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    title: 'STREMDBC Client',
+    title: 'StreamDBC Control Panel',
     icon: path.join(__dirname, 'assets', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -607,7 +619,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
               title: 'About STREMDBC Client',
-              message: 'STREMDBC Client v1.0.0',
+              message: `StreamDBC Control Panel v${app.getVersion()}`,
               detail: 'Streaming management control plane GUI client\n\nConnects to STREMDBC server for stream management, monitoring, and playback.'
             });
           }
@@ -700,7 +712,7 @@ function createMenu() {
             dialog.showMessageBox(mainWindow, {
               type: 'info',
               title: 'About',
-              message: 'STREMDBC Client v1.0.0'
+              message: `StreamDBC Control Panel v${app.getVersion()}`
             });
           }
         }
@@ -915,7 +927,8 @@ async function samsungAction(serverUrl, action) {
 }
 
 function samsungPublicUrl(kind) {
-  const hostname = String(settings.cloudflareHostname || 'ztv.zeaz.dev').trim();
+  let hostname = 'ztv.zeaz.dev';
+  try { hostname = normalizeCloudflareHostname(settings.cloudflareHostname || hostname); } catch {}
   const urls = {
     tv: `http://${hostname}:8081/tv/`,
     ping: `http://${hostname}:8081/tv/ping`,
@@ -1014,7 +1027,7 @@ async function getAuthToken(serverUrl, streamId, action) {
 
 app.whenReady().then(() => {
   loadSettings();
-  app.setName('STREMDBC Client');
+  app.setName('StreamDBC Control Panel');
   app.setAppUserModelId('com.stremdbc.client');
 
   createMainWindow();
