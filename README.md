@@ -138,6 +138,14 @@ Cloudflare DNS status from the same Samsung TV view.
 See [`docs/SINGLE-CONTROL-PANEL.md`](docs/SINGLE-CONTROL-PANEL.md) and
 [`docs/SAMSUNG-F5500.md`](docs/SAMSUNG-F5500.md) for the operational runbook.
 
+### One-command Windows installer build
+
+```powershell
+.\scripts\windows\full-build-installer.ps1
+```
+
+This performs dependency installation, Go tests, npm audit, JavaScript syntax checks, Zeazdev `apps.ico` generation, bundled FFmpeg/server runtime preparation, NSIS + portable builds, and writes `client\dist\SHA256SUMS.txt` plus `build-manifest.json`.
+
 ## Docker Compose
 
 The production-oriented sample requires injected secrets and exposes host
