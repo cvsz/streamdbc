@@ -29,7 +29,18 @@ New-Item -ItemType Directory -Path $tempRoot,$extract,$Destination -Force | Out-
 try {
     Write-Host "Downloading verified FFmpeg x64 GPL build..." -ForegroundColor Cyan
     Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+    $stream = [System.IO.File]::OpenRead($zip)
+    try {
+        $hasher = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $actualBytes = $hasher.ComputeHash($stream)
+        } finally {
+            $hasher.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    $actual = ([System.BitConverter]::ToString($actualBytes)).Replace("-", "").ToLowerInvariant()
     if ($actual -ne $sha256) { throw "FFmpeg SHA256 mismatch: $actual" }
 
     Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
