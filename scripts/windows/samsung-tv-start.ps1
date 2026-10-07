@@ -18,6 +18,10 @@ $Executable = [System.IO.Path]::GetFullPath($Executable)
 $baseUrl = "http://127.0.0.1:$Port"
 $pidDirectory = Join-Path $env:LOCALAPPDATA "StreamDBC"
 $pidFile = Join-Path $pidDirectory "samsung-tv.pid"
+$resolvedFFmpeg = Get-SamsungTVFFmpegPath -Requested "ffmpeg"
+if ($resolvedFFmpeg) {
+    $env:STREMDBC_FFMPEG_PATH = $resolvedFFmpeg
+}
 
 if (-not $SkipDoctor) {
     & (Join-Path $PSScriptRoot "samsung-tv-doctor.ps1") -Port $Port -AllowPortInUse
