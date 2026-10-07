@@ -28,13 +28,18 @@ func newSamsungTestServer(t *testing.T, enableGateway bool) *Server {
 		// so /tv/live routes can be registered during the test.
 		if runtime.GOOS == "windows" {
 			cmd, err := exec.LookPath("cmd.exe")
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			cfg.FFmpegPath = cmd
 		} else {
 			fake := filepath.Join(t.TempDir(), "fake-ffmpeg")
-			if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil { t.Fatal(err) }
+			if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+				t.Fatal(err)
+			}
 			cfg.FFmpegPath = fake
 		}
+	}
 
 	manager, err := samsunggateway.NewManager(&cfg, nil)
 	if err != nil {
