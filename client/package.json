@@ -6,7 +6,7 @@
   "scripts": {
     "start": "npm run generate:icon && electron .",
     "build": "node build.js",
-    "build:win": "npm run generate:icon && npm run vendor && npm run prepare-runtime && electron-builder --win nsis portable --publish never",
+    "build:win": "node scripts/check-sprintf-precision.js && npm run generate:icon && npm run vendor && npm run prepare-runtime && electron-builder --win nsis portable --publish never",
     "dev": "electron . --enable-logging",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
@@ -25,7 +25,8 @@
   },
   "devDependencies": {
     "electron": "^44.4.1",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "sprintf-js": "file:patches/sprintf-js"
   },
   "build": {
     "appId": "com.stremdbc.client",
