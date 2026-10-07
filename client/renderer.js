@@ -319,6 +319,32 @@ async function refreshSamsungStatus() {
   $('tvProfile').textContent = body.profile || '—';
 }
 
+async function refreshServerRuntimeStatus() {
+  const status = await API.getServerRuntimeStatus();
+  const state = $('runtimeState');
+  const source = $('runtimeSource');
+  const pid = $('runtimePid');
+  const exe = $('runtimeExecutable');
+  if (state) {
+    state.textContent = status?.running ? 'RUNNING' : 'STOPPED';
+    state.className = status?.running ? 'value small-value ok-text' : 'value small-value';
+  }
+  if (source) source.textContent = status?.source || '—';
+  if (pid) pid.textContent = status?.managedPid || '—';
+  if (exe) exe.textContent = status?.executable || 'Not found';
+  if (status?.lastError) $('builderOutput').textContent = `Server error: ${status.lastError}`;
+}
+
+async function runServerRuntimeAction(action) {
+  $('builderOutput').textContent = `Running server action: ${action}...\n`;
+  const result = await API.serverRuntimeAction(action);
+  $('builderOutput').textContent += JSON.stringify(result, null, 2);
+  showToast(result?.ok ? `Server ${action} completed` : `Server ${action} failed`, result?.ok ? 'success' : 'error');
+  await refreshServerRuntimeStatus();
+  await refreshSamsungStatus();
+  await refreshData();
+}
+
 async function runTvAction(action) {
   $('builderOutput').textContent = `Running TV action: ${action}...\n`;
   const result = await API.samsungAction({ serverUrl: settings.serverUrl, action });
@@ -383,6 +409,7 @@ function init() {
     refreshData();
     refreshInterval = setInterval(refreshData, 5000);
     refreshSamsungStatus();
+    refreshServerRuntimeStatus();
   });
 
   $('refreshBtn').addEventListener('click', refreshData);
@@ -429,7 +456,15 @@ function init() {
     }
   });
 
-  $('samsungRefreshBtn').addEventListener('click', refreshSamsungStatus);
+  $('samsungRefreshBtn').addEventListener('click', async () => {
+    await refreshSamsungStatus();
+    await refreshServerRuntimeStatus();
+  });
+  document.querySelectorAll('[data-server-action]').forEach(btn => {
+    btn.addEventListener('click', () => runServerRuntimeAction(btn.dataset.serverAction));
+  });
+  $('openLocalDashboardBtn').addEventListener('click', () => API.openLocalDashboard());
+  $('openLocalTVBtn').addEventListener('click', () => API.openLocalTV());
   $('selectWorkspaceBtn').addEventListener('click', selectWorkspace);
   $('clearBuilderOutputBtn').addEventListener('click', () => { $('builderOutput').textContent = 'Ready.'; });
   document.querySelectorAll('[data-tv-action]').forEach(btn => {
