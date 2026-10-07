@@ -21,13 +21,13 @@ offer 60 fps even when the Samsung profile is 30 fps.
 - vMix External Output enabled, exposing `vMix Video` and `vMix Audio`.
 - Samsung UA40F5500 and PC on the same LAN/subnet. Disable access-point client
   isolation so the TV can reach the PC.
-- Windows network profile set to Private and inbound TCP 8080 permitted on the
+- Windows network profile set to Private and inbound TCP 8081 permitted on the
   Private profile only.
 - Go 1.27+ to build StreamDBC, or a `stremdbc.exe` binary in the repository
   root.
 
 The F5500 profile uses API-key-protected gateway controls and anonymous LAN
-playback. Keep port 8080 on a trusted private network. Set credentials in the
+playback. Keep port 8081 on a trusted private network. Set credentials in the
 PowerShell session that starts StreamDBC:
 
 ```powershell
@@ -74,7 +74,7 @@ go build -o stremdbc.exe ./cmd/stremdbc
 
 The doctor reports actionable PASS/FAIL checks for Windows, an active LAN and
 Wi-Fi interface, Private network category, FFmpeg, vMix, both DirectShow
-devices, TCP 8080, the scoped firewall rule, credentials, and output-directory
+devices, TCP 8081, the scoped firewall rule, credentials, and output-directory
 writability.
 
 To add the inbound firewall rule, open PowerShell as Administrator and run:
@@ -83,7 +83,7 @@ To add the inbound firewall rule, open PowerShell as Administrator and run:
 .\scripts\windows\samsung-tv-firewall.ps1
 ```
 
-This creates an idempotent inbound allow rule for TCP 8080 on the Private
+This creates an idempotent inbound allow rule for TCP 8081 on the Private
 profile only. Remove it with:
 
 ```powershell
@@ -101,12 +101,12 @@ addresses and test the local listener with PowerShell:
 
 ```powershell
 Get-NetIPAddress -AddressFamily IPv4
-Test-NetConnection -ComputerName 127.0.0.1 -Port 8080
+Test-NetConnection -ComputerName 127.0.0.1 -Port 8081
 ```
 
 The TV and PC must be on the same subnet. Confirm that the active network is
 Private and that the router has no client/AP isolation. If needed, run
-`Test-NetConnection -ComputerName <PC-LAN-IP> -Port 8080` from another Windows
+`Test-NetConnection -ComputerName <PC-LAN-IP> -Port 8081` from another Windows
 device on the same Wi-Fi network.
 
 ## 5. Open the Samsung browser
@@ -114,13 +114,13 @@ device on the same Wi-Fi network.
 On the TV, open its browser and enter the URL printed by the start script:
 
 ```text
-http://<PC-LAN-IP>:8080/tv
+http://<PC-LAN-IP>:8081/tv
 ```
 
 The direct native HLS fallback is:
 
 ```text
-http://<PC-LAN-IP>:8080/tv/live/index.m3u8
+http://<PC-LAN-IP>:8081/tv/live/index.m3u8
 ```
 
 The basic page at `/tv/basic` contains only a video element and is useful when
@@ -130,10 +130,11 @@ external scripts.
 
 ## 6. Fullscreen playback
 
-Use the TV browser's video controls and remote to start playback. Hide the
-browser chrome or enter fullscreen using the browser's own controls if that
-option is available in the installed TV firmware. The exact remote interaction
-varies by firmware; it has not been verified on the target set.
+The default /tv page is kiosk-style: video fills the viewport, browser controls
+are omitted, and playback starts automatically when firmware policy allows it.
+ENTER/PLAY/PAUSE/RED retries playback if autoplay is blocked or the HLS stream
+temporarily drops. A Samsung Legacy launcher app can navigate directly to
+http://<PC-LAN-IP>:8081/tv/ so no iframe or browser address bar is required.
 
 ## 7. Stop, restart, and test
 
@@ -162,7 +163,7 @@ long-running soak.
 - If the page opens but video does not, try `/tv/basic`, then open the direct
   HLS URL. Confirm `/api/v1/tv/status` reports `live` and `playlist_ready`.
 - If the TV cannot connect, verify the PC's LAN IP, same subnet, Private
-  network profile, TCP 8080 rule, and router client-isolation setting.
+  network profile, TCP 8081 rule, and router client-isolation setting.
   A plain-text `GET /tv/ping` (expect `pong`) checks basic reachability
   before involving HLS at all.
 - If decode is unstable, edit the profile to use a lower video bitrate while
