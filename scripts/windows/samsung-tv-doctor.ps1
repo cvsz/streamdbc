@@ -3,7 +3,8 @@ param(
     [int]$Port = 8081,
     [string]$FFmpegPath = "ffmpeg",
     [string]$OutputPath = (Join-Path $env:LOCALAPPDATA "StreamDBC\SamsungTV"),
-    [switch]$AllowPortInUse
+    [switch]$AllowPortInUse,
+    [switch]$RequireVMix
 )
 
 $script:Failures = 0
@@ -48,15 +49,17 @@ if ($ffmpegSource) {
     $deviceOutput = (& $ffmpegSource -hide_banner -list_devices true -f dshow -i dummy 2>&1 | Out-String)
 }
 $vmixProcess = Get-Process -Name "vmix64", "vmix" -ErrorAction SilentlyContinue | Select-Object -First 1
-Report-Check ($null -ne $vmixProcess) "vMix running" $(if ($vmixProcess) { $vmixProcess.ProcessName } else { "Start vMix and enable External Output" })
-if (-not $ffmpegSource) {
-    # Without FFmpeg there is no device list to print; point at the FFmpeg
-    # check instead of showing an empty "detected devices" section.
-    Report-Check $false "vMix Video" "cannot enumerate DirectShow devices without FFmpeg; fix the FFmpeg check above, then rerun"
-    Report-Check $false "vMix Audio" "cannot enumerate DirectShow devices without FFmpeg; fix the FFmpeg check above, then rerun"
+if ($RequireVMix) {
+    Report-Check ($null -ne $vmixProcess) "vMix running" $(if ($vmixProcess) { $vmixProcess.ProcessName } else { "Start vMix and enable External Output" })
+    if (-not $ffmpegSource) {
+        Report-Check $false "vMix Video" "cannot enumerate DirectShow devices without FFmpeg; fix the FFmpeg check above, then rerun"
+        Report-Check $false "vMix Audio" "cannot enumerate DirectShow devices without FFmpeg; fix the FFmpeg check above, then rerun"
+    } else {
+        Report-Check ($deviceOutput -match "(?i)vMix Video") "vMix Video" $(if ($deviceOutput -match "(?i)vMix Video") { "DirectShow capture device detected" } else { "Not found; detected DirectShow devices:`n$deviceOutput" })
+        Report-Check ($deviceOutput -match "(?i)vMix Audio") "vMix Audio" $(if ($deviceOutput -match "(?i)vMix Audio") { "DirectShow capture device detected" } else { "Not found; detected DirectShow devices:`n$deviceOutput" })
+    }
 } else {
-    Report-Check ($deviceOutput -match "(?i)vMix Video") "vMix Video" $(if ($deviceOutput -match "(?i)vMix Video") { "DirectShow capture device detected" } else { "Not found; detected DirectShow devices:`n$deviceOutput" })
-    Report-Check ($deviceOutput -match "(?i)vMix Audio") "vMix Audio" $(if ($deviceOutput -match "(?i)vMix Audio") { "DirectShow capture device detected" } else { "Not found; detected DirectShow devices:`n$deviceOutput" })
+    Write-Host "INFO vMix/DirectShow checks skipped (remote RTMP server mode)." -ForegroundColor DarkCyan
 }
 
 $listener = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
