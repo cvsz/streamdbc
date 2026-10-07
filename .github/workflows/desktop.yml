@@ -51,11 +51,11 @@ jobs:
           cache: npm
           cache-dependency-path: client/package-lock.json
 
-      - name: Install locked dependencies
-        run: npm ci --ignore-scripts
+      - name: Install locked dependencies without vulnerable optional proxy chain
+        run: npm ci --ignore-scripts --omit=optional
 
-      - name: Audit dependencies
-        run: npm audit --audit-level=high
+      - name: Audit installed dependency set
+        run: npm audit --omit=optional --audit-level=moderate
 
       - name: Vendor browser runtime
         run: npm run vendor
@@ -82,7 +82,6 @@ jobs:
             exit 1
           fi
 
-
   build-windows:
     name: Windows installer and portable build
     runs-on: windows-latest
@@ -107,8 +106,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install locked dependencies
-        run: npm ci
+      - name: Install locked dependencies without vulnerable optional proxy chain
+        run: npm ci --omit=optional
 
       - name: Vendor browser runtime
         run: npm run vendor
