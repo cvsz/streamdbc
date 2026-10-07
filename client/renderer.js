@@ -5,6 +5,8 @@ let settings = {};
 let streams = [];
 let health = null;
 let refreshInterval = null;
+let samsungFleet = [];
+let samsungFleetState = new Map();
 
 function $(id) { return document.getElementById(id); }
 
@@ -457,6 +459,102 @@ function formatDuration(seconds) {
 function escapeHtml(str) {
   if (typeof str !== 'string') return '';
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderSamsungFleet() {
+  const body = $('samsungFleetBody');
+  if (!body) return;
+  $('fleetCount').textContent = String(samsungFleet.length);
+  $('fleetAvCount').textContent = String(samsungFleet.filter((tv) => tv.capabilities?.avTransport).length);
+  $('fleetRcCount').textContent = String(samsungFleet.filter((tv) => tv.capabilities?.renderingControl).length);
+  $('fleetPlaying').textContent = String(
+    samsungFleet.filter((tv) => samsungFleetState.get(tv.ip)?.transport === 'PLAYING').length
+  );
+
+  if (!samsungFleet.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty">No Samsung TVs discovered.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = samsungFleet.map((tv) => {
+    const state = samsungFleetState.get(tv.ip) || {};
+    const volume = Number.isFinite(state.volume) ? state.volume : 20;
+    const muted = state.muted === true;
+    const canPlay = tv.capabilities?.setAVTransportURI && tv.capabilities?.play;
+    return `<tr data-tv-ip="${escapeHtml(tv.ip)}">
+      <td><strong>${escapeHtml(tv.friendlyName || 'Samsung TV')}</strong></td>
+      <td><code>${escapeHtml(tv.ip)}</code></td>
+      <td>${escapeHtml(tv.modelName || '—')}</td>
+      <td>${escapeHtml(state.transport || 'UNKNOWN')}</td>
+      <td><input class="fleet-volume" type="number" min="0" max="100" value="${volume}" style="width:72px"></td>
+      <td>${muted ? 'Muted' : 'On'}</td>
+      <td><div class="actions">
+        <button class="btn btn-sm btn-primary" data-fleet-action="play-url" ${canPlay ? '' : 'disabled'}>Play URL</button>
+        <button class="btn btn-sm" data-fleet-action="stop" ${tv.capabilities?.stop ? '' : 'disabled'}>Stop</button>
+        <button class="btn btn-sm" data-fleet-action="volume" ${tv.capabilities?.renderingControl ? '' : 'disabled'}>Set Vol</button>
+        <button class="btn btn-sm" data-fleet-action="${muted ? 'unmute' : 'mute'}" ${tv.capabilities?.renderingControl ? '' : 'disabled'}>${muted ? 'Unmute' : 'Mute'}</button>
+      </div></td>
+    </tr>`;
+  }).join('');
+}
+
+async function discoverSamsungFleet() {
+  const button = $('fleetDiscoverBtn');
+  if (button) button.disabled = true;
+  try {
+    const result = await API.samsungFleetDiscover();
+    if (!result?.ok) throw new Error(result?.error || 'Samsung discovery failed');
+    samsungFleet = result.tvs || [];
+    samsungFleetState = new Map();
+    if ($('fleetMediaUrl') && !$('fleetMediaUrl').value && result.localIP) {
+      $('fleetMediaUrl').value = `http://${result.localIP}:8081/tv/live/index.m3u8`;
+    }
+    renderSamsungFleet();
+    showToast(`Discovered ${samsungFleet.length} Samsung TV(s)`, 'success');
+    await refreshSamsungFleetState();
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function refreshSamsungFleetState() {
+  if (!samsungFleet.length) return;
+  const result = await API.samsungFleetStatus();
+  if (!result?.ok) {
+    showToast(result?.error || 'Failed to refresh Samsung TV state', 'error');
+    return;
+  }
+  for (const state of result.states || []) samsungFleetState.set(state.ip, state);
+  renderSamsungFleet();
+}
+
+async function runSamsungFleetAction(ip, action, value) {
+  const result = await API.samsungFleetAction({ ip, action, value });
+  if (!result?.ok) {
+    const detail = result?.errorDescription || result?.errorCode || result?.error || result?.statusCode || 'Action failed';
+    showToast(`${ip}: ${detail}`, 'error');
+    return false;
+  }
+  if (result.state) samsungFleetState.set(ip, result.state);
+  renderSamsungFleet();
+  return true;
+}
+
+async function runSamsungFleetAll(action, value) {
+  if (!samsungFleet.length) {
+    showToast('Discover Samsung TVs first', 'error');
+    return;
+  }
+  const result = await API.samsungFleetActionAll({ action, value });
+  const failed = (result?.results || []).filter((item) => !item.ok);
+  if (failed.length) {
+    showToast(`${failed.length} TV action(s) failed`, 'error');
+  } else {
+    showToast(`Applied ${action} to ${(result?.results || []).length} TV(s)`, 'success');
+  }
+  await refreshSamsungFleetState();
 }
 
 function init() {
