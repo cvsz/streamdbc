@@ -8,6 +8,15 @@ const crypto = require('crypto');
 const os = require('os');
 const { discoverFleet, getTVState, runTVAction } = require('./samsung-fleet');
 
+const electronSessionRoot = path.join(os.tmpdir(), 'StreamDBC', 'electron-session');
+try {
+  fs.mkdirSync(electronSessionRoot, { recursive: true });
+  app.setPath('sessionData', electronSessionRoot);
+  app.commandLine.appendSwitch('disk-cache-dir', path.join(electronSessionRoot, 'Cache'));
+} catch (err) {
+  console.warn('Unable to configure writable Electron session cache:', err.message);
+}
+
 let mainWindow = null;
 let tray = null;
 let playerWindow = null;
@@ -314,7 +323,7 @@ function createMainWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'StreamDBC Control Panel',
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    ...(fs.existsSync(path.join(__dirname, 'assets', 'icon.png')) ? { icon: path.join(__dirname, 'assets', 'icon.png') } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -683,7 +692,19 @@ function createTray() {
     trayImage = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${svg.toString('base64')}`);
   }
   if (!trayImage || trayImage.isEmpty()) {
-    console.error('System tray icon is unavailable');
+    const fallbackSvg = [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">',
+      '<rect x="2" y="5" width="28" height="22" rx="5" fill="#202633"/>',
+      '<rect x="5" y="8" width="22" height="16" rx="3" fill="#667eea"/>',
+      '<polygon points="13,11 13,21 22,16" fill="#ffffff"/>',
+      '</svg>'
+    ].join('');
+    trayImage = nativeImage.createFromDataURL(
+      'data:image/svg+xml;base64,' + Buffer.from(fallbackSvg).toString('base64')
+    );
+  }
+  if (!trayImage || trayImage.isEmpty()) {
+    console.error('System tray icon could not be created');
     return;
   }
 
