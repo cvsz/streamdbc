@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [int]$Port = 8080,
+    [int]$Port = 8081,
     [string]$FFmpegPath = "ffmpeg",
     [string]$OutputPath = (Join-Path $env:LOCALAPPDATA "StreamDBC\SamsungTV"),
     [switch]$AllowPortInUse
