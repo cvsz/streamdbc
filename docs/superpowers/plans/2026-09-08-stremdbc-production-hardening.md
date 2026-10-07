@@ -187,3 +187,38 @@ BLOCKED release gate: `govulncheck` reports `GO-2026-4479` in
 `github.com/pion/dtls/v2@v2.2.12`, with no upstream fixed version. WebRTC
 remains disabled by default and must not be enabled for production until this
 is resolved or formally accepted with compensating controls.
+
+
+---
+
+## 2026-10-08 Samsung Single Control Panel addendum
+
+The original hardening plan predates the Windows Single Control Panel and
+Samsung fleet controller. The following implementation is now present on
+PR #36:
+
+- [x] Electron Control Panel v1.4.0
+- [x] bundled Samsung fleet module included in the Windows package
+- [x] SSDP discovery bound to the selected physical private-LAN IPv4
+- [x] dynamic parsing of device/service/SCPD endpoints
+- [x] multi-LOCATION merge per TV
+- [x] AVTransport Play URL / Stop and state reads
+- [x] RenderingControl volume/mute
+- [x] fleet fan-out operations
+- [x] renderer-to-main IPC boundary; no arbitrary SOAP endpoint supplied by UI
+- [x] private-LAN service URL validation
+- [x] Desktop CI syntax checks
+- [x] Windows installer/portable build green
+- [x] CodeQL, CI, Samsung gateway and Windows server workflows green
+
+External production evidence still required:
+
+- [ ] physical `SetAVTransportURI + Play` success on every target TV
+- [ ] media-format matrix from `GetProtocolInfo` plus physical decode
+- [ ] five-TV simultaneous playback
+- [ ] reboot/rediscovery
+- [ ] Wi-Fi loss/recovery
+- [ ] latency measurement and multi-hour soak
+
+This addendum does not retroactively convert the external physical-device gates
+into completed release evidence.

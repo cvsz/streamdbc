@@ -1,8 +1,9 @@
 # STREMDBC
 
 STREMDBC is a Go streaming management control plane with bounded protocol
-adapters, reusable FFmpeg components, and a dedicated Samsung F5500 HLS
-capture gateway for vMix External Output on Windows.
+adapters, reusable FFmpeg components, a dedicated Samsung F5500 media gateway,
+and a Windows Single Control Panel for server/runtime operations and
+discovery-driven Samsung TV fleet control.
 
 ## Verified scope
 
@@ -21,7 +22,9 @@ DirectShow devices to H.264/AAC MPEG-TS HLS.
 | WHIP/WHEP | SDP peer negotiation and publisher-track detection; RTP forwarding is unavailable |
 | RTMP/RTSP outputs | Bounded consumer/control endpoints; no outbound media writer |
 | Recorder, DVR, transcoder | Reusable managers; no executable API/media-source wiring |
-| Samsung F5500 gateway | vMix DirectShow capture, H.264/AAC HLS, legacy `/tv` pages; requires Windows device and physical TV validation |
+| Samsung F5500 gateway | vMix DirectShow capture, H.264/AAC HLS, legacy `/tv` pages; physical decode/soak validation remains a device gate |
+| Windows Single Control Panel | v1.4.0: server + FFmpeg + gateway + LAN/Cloudflare + SSDP Samsung fleet discovery/control |
+| Samsung fleet control | Discovery-driven UPnP AVTransport/RenderingControl; Play URL, Stop, Volume, Mute, Play All/Stop All; no hard-coded `/smp_*` endpoints |
 | Redis cluster | Redis node registration, heartbeat, discovery, and selection primitives |
 | PostgreSQL | Configuration is rejected until schema integration is implemented |
 
@@ -75,52 +78,73 @@ go run ./cmd/stremdbc -config configs/config.dev.yaml
 The development config binds the API to `127.0.0.1` and leaves authentication
 off. Do not expose it beyond the local machine.
 
-## Samsung F5500 Wi-Fi Output
+## Samsung F5500 Wi-Fi Output and Fleet Control
 
-The Samsung F5500 Wi-Fi playback gateway receives the vMix Program output on
-the Windows host and transcodes it to legacy-compatible H.264/AAC HLS for
-playback by the television over the LAN. The television receives HLS; it does
-not receive NDI. The default profile is 1280x720 at 30 fps with two-second
-MPEG-TS segments and a six-segment playlist. Expected glass-to-glass latency is
-about 6–15 seconds.
+StreamDBC supports two complementary paths for the Samsung UA40F5500/Y2013
+fleet:
+
+1. **Media gateway:** vMix External Output is captured by FFmpeg and delivered
+   as Samsung-compatible H.264/AAC HLS over the LAN.
+2. **Fleet control:** the Windows Single Control Panel discovers TVs with SSDP,
+   resolves each TV's advertised UPnP service endpoints dynamically, and uses
+   DLNA/UPnP AVTransport and RenderingControl for playback and basic controls.
+
+The television does not consume NDI directly.
 
 ```text
-vMix PC
-  ↓ External Output 1 (Program) / vMix Video + vMix Audio
-StreamDBC Samsung Gateway / FFmpeg
-  ↓ H.264 + AAC MPEG-TS HLS over Wi-Fi
-Samsung UA40F5500 browser
+vMix / NDI sources
+      ↓
+     vMix
+      ↓ External Output / RTMP source
+StreamDBC + FFmpeg
+      ↓ HTTP media
+Windows Single Control Panel
+      ↓ SSDP + UPnP AVTransport
+Samsung UA40F5500 fleet
 ```
 
-On the vMix PC, open PowerShell in the repository and set credentials for the
-protected gateway start/stop operations:
+The current Samsung profile remains 1280x720 at 30 fps, H.264/AAC, with
+two-second MPEG-TS HLS segments. Browser playback remains available at
+`/tv/`, but AVTransport is the preferred fleet-control path when the TV accepts
+the selected media URL.
+
+The Control Panel does **not** hard-code `/smp_*` paths. Samsung Y2013 firmware
+can expose different endpoint numbers on different TVs and after reboot. The
+controller follows:
+
+```text
+SSDP → LOCATION → device description → service controlURL/SCPDURL → SOAP action
+```
+
+Current Control Panel actions:
+
+- Discover TVs
+- Refresh transport/volume/mute state
+- Play one media URL on one TV
+- Stop one TV
+- Set volume
+- Mute/unmute
+- Play All / Stop All
+- Mute All / Unmute All
+
+Samsung-specific `MainTVAgent2` is discovered and recorded but remains
+secondary because real firmware may return UPnP `501 Action Failed` for actions
+such as `RunBrowser`.
+
+On Windows, the v1.4.0 Control Panel also manages the StreamDBC server runtime,
+bundled FFmpeg, gateway operations, Windows Doctor/builder tasks, and LAN /
+Cloudflare DNS status from the same Samsung TV view.
+
+See [`docs/SINGLE-CONTROL-PANEL.md`](docs/SINGLE-CONTROL-PANEL.md) and
+[`docs/SAMSUNG-F5500.md`](docs/SAMSUNG-F5500.md) for the operational runbook.
+
+### One-command Windows installer build
 
 ```powershell
-$env:STREMDBC_JWT_SECRET = ((New-Guid).Guid + (New-Guid).Guid)
-$env:STREMDBC_API_KEY = ((New-Guid).Guid + (New-Guid).Guid)
-go build -o stremdbc.exe ./cmd/stremdbc
-.\scripts\windows\samsung-tv-doctor.ps1
-.\scripts\windows\samsung-tv-start.ps1
+.\scripts\windows\full-build-installer.ps1
 ```
 
-The doctor checks FFmpeg, vMix DirectShow devices, LAN/Wi-Fi, firewall scope,
-port 8081, credentials, and output-directory access. To add the narrowly scoped
-Private-profile TCP 8081 rule, run
-`scripts\windows\samsung-tv-firewall.ps1` from elevated PowerShell. Remove it
-with `scripts\windows\samsung-tv-firewall.ps1 -Remove`.
-
-Open `http://ztv.zeaz.dev:8081/tv/` in the television browser. The LAN-IP fallback is `http://192.168.1.100:8081/tv/`.
-The direct HLS fallback is
-`http://ztv.zeaz.dev:8081/tv/live/index.m3u8`; `/tv/basic` is available when the
-browser struggles with the status page. Use
-`scripts\windows\samsung-tv-test.ps1` for HTTP, MIME type, and playlist-refresh
-checks, and `scripts\windows\samsung-tv-stop.ps1` to stop the gateway. Keep the
-PC and TV on the same subnet and disable Wi-Fi client isolation. Physical
-UA40F5500 playback and long soak gates are still required before claiming TV
-compatibility.
-
-See [`docs/SAMSUNG-F5500.md`](docs/SAMSUNG-F5500.md) for the complete Windows and
-TV setup.
+This performs dependency installation, Go tests, npm audit, JavaScript syntax checks, Zeazdev `apps.ico` generation, bundled FFmpeg/server runtime preparation, NSIS + portable builds, and writes `client\dist\SHA256SUMS.txt` plus `build-manifest.json`.
 
 ## Docker Compose
 
@@ -218,7 +242,8 @@ internal/recorder/       FFmpeg recording manager
 internal/transcoder/     FFmpeg ABR worker pool
 internal/metrics/        Prometheus telemetry
 web/                     zero-build dashboard and player
-client/                  desktop client
+client/                  desktop Windows Single Control Panel
+client/samsung-fleet.js discovery-driven Samsung UPnP fleet controller
 client/tv/               native Android TV RTSP client
 deployments/             deployment assets
 .github/workflows/       CI and CodeQL definitions

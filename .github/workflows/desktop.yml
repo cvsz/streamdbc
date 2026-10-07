@@ -71,6 +71,7 @@ jobs:
           node --check renderer.js
           node --check player.js
           node --check build.js
+          node --check scripts/generate-windows-icon.js
           node --check scripts/prepare-server-runtime.js
           node --check scripts/vendor-hls.js
 
@@ -125,11 +126,12 @@ jobs:
 
       - name: Build Windows installer, portable app, and bundled server runtime
         shell: pwsh
-        run: npm run build:win
+        run: ..\scripts\windows\full-build-installer.ps1 -SkipTests
 
       - name: Verify bundled server runtime
         shell: pwsh
         run: |
+          if (-not (Test-Path assets/apps.ico)) { throw "Zeazdev apps.ico missing" }
           if (-not (Test-Path server-runtime/stremdbc.exe)) { throw "Bundled stremdbc.exe missing" }
           if (-not (Test-Path server-runtime/configs/samsung-f5500.yaml)) { throw "Samsung config missing" }
           if (-not (Test-Path server-runtime/web/tv/index.html)) { throw "TV web assets missing" }
@@ -151,5 +153,7 @@ jobs:
           path: |
             client/dist/*.exe
             client/dist/*.yml
+            client/dist/build-manifest.json
+            client/dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14

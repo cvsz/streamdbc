@@ -1,9 +1,10 @@
 # Samsung UA40F5500 Wi-Fi Playback
 
-This guide sends vMix Output 1 (Program) from a Windows PC to a Samsung F5500
-browser over the local network. StreamDBC captures the host's `vMix Video` and
-`vMix Audio` DirectShow devices and creates H.264/AAC MPEG-TS HLS. The TV does
-not receive or need NDI.
+This guide covers both Samsung UA40F5500/Y2013 playback and fleet control.
+StreamDBC can capture vMix Output 1 (Program) and create H.264/AAC MPEG-TS HLS,
+while the Windows Single Control Panel discovers Samsung TVs over SSDP and
+controls their advertised UPnP services. The TV does not receive or need NDI
+directly.
 
 The supported server profile is 1280x720, 30 fps, H.264 Main level 3.1,
 yuv420p, AAC-LC stereo at 48 kHz, two-second MPEG-TS segments, and a six-entry
@@ -13,6 +14,37 @@ optional 1080p profile has not been validated on the UA40F5500.
 DirectShow negotiates the frame rate exposed by the vMix device; the gateway
 then encodes the selected profile frame rate. This supports vMix outputs that
 offer 60 fps even when the Samsung profile is 30 fps.
+
+## 0. Control paths
+
+There are two supported operator paths:
+
+1. **Browser/HLS path** — open `/tv/` or `/tv/basic` manually on the TV.
+2. **UPnP fleet path** — use the Windows Single Control Panel to discover the
+   TV and invoke AVTransport/RenderingControl.
+
+For the UPnP path, endpoint numbers are deliberately not hard-coded. The same
+UA40F5500 family has been observed with different AVTransport control URLs such
+as `/smp_46_`, `/smp_24_`, and `/smp_22_`. The controller therefore
+discovers:
+
+```text
+SSDP → LOCATION → service list → SCPD → controlURL → SOAP
+```
+
+A single physical TV may advertise separate SSDP descriptions for
+MediaRenderer, MainTVServer2, DIAL, and remote-control services. The Control
+Panel merges these descriptions into one fleet entry.
+
+Primary fleet service priority:
+
+1. DLNA/UPnP AVTransport
+2. RenderingControl
+3. Samsung MainTVAgent2 as optional/fallback
+4. DIAL / MultiScreen discovery as optional capabilities
+
+`MainTVAgent2` actions are not assumed to work merely because they appear in
+SCPD. Real F5500 firmware may return UPnP `501 Action Failed`.
 
 ## 1. Requirements
 
@@ -206,3 +238,48 @@ should therefore be confined to a trusted network segment, and mutations
 (`/tv/start`, `/tv/stop`, `/tv/restart`, stream management) remain protected
 by the management API key / JWT. Ingest publish and output play endpoints
 still require valid tokens because they are separate authenticated surfaces.
+
+
+## 9. Single Control Panel fleet workflow
+
+Use the Windows Control Panel v1.4.0 Samsung TV view.
+
+1. Start or verify the StreamDBC server and FFmpeg runtime.
+2. Click **Discover TVs**.
+3. Confirm each expected UA40F5500 appears with AVTransport.
+4. Enter the media URL that the TVs can reach from the LAN.
+5. Use **Play URL** per TV or **Play URL on All**.
+6. Use **Refresh State** to read transport, volume and mute status.
+7. Use **Stop**, **Set Vol**, **Mute/Unmute**, or the all-TV equivalents.
+
+A typical live URL is:
+
+```text
+http://<streamdbc-lan-ip>:8081/tv/live/index.m3u8
+```
+
+Do not assume HLS is accepted by AVTransport until the physical TV confirms it.
+For compatibility testing, start with a known-good HTTP MP4, then test MPEG-TS
+and HLS.
+
+### Current fleet behavior validated by discovery
+
+The current UA40F5500 fleet exposes MediaRenderer, AVTransport,
+RenderingControl, ConnectionManager, MainTVAgent2, and DIAL-family services.
+The exact `/smp_*` numbers vary by device.
+
+### Production acceptance
+
+Fleet discovery alone is not sufficient to claim production playback. Record
+evidence for:
+
+- `SetAVTransportURI` HTTP success;
+- `Play` HTTP success;
+- `GetTransportInfo = PLAYING`;
+- visible video and audible audio on every TV;
+- simultaneous five-TV fan-out;
+- TV reboot and endpoint rediscovery;
+- source loss/recovery;
+- Wi-Fi interruption recovery;
+- latency, CPU/RAM and soak duration.
+

@@ -72,6 +72,32 @@ profile enables anonymous HLS playback on the trusted LAN while keeping these
 management operations API-key protected. See
 [`SAMSUNG-F5500.md`](SAMSUNG-F5500.md) for network and Windows setup.
 
+## Windows Control Panel Samsung fleet IPC
+
+Samsung fleet discovery/control in v1.4.0 is implemented in the Electron
+Control Panel, not as public HTTP management endpoints. The renderer calls
+preload IPC methods, and the Electron main process owns SSDP/UPnP network
+access.
+
+Current IPC capabilities:
+
+- discover fleet;
+- list the current in-memory fleet;
+- refresh AVTransport/RenderingControl state;
+- per-TV Play URL / Play / Pause / Stop;
+- per-TV volume and mute;
+- Play All / Stop All / Mute All / Unmute All.
+
+The controller accepts actions only for TVs present in the current
+SSDP-discovered fleet. Device/service URLs must be private IPv4 HTTP URLs and
+must match the SSDP responder address. There is intentionally no arbitrary
+SOAP URL input from the renderer.
+
+These IPC methods are an implementation detail of the Windows application and
+are not part of the stable server REST API. If server-side fleet REST endpoints
+are added later, they require separate authentication, authorization,
+rate-limiting and audit review.
+
 ## Streams
 
 ### `GET /api/v1/streams`
@@ -198,6 +224,5 @@ requested subsystem is disabled.
 - Restrict CORS to exact trusted origins.
 - Put TLS and a trusted proxy in front of the management plane, or enable the relevant protocol TLS configuration.
 - Keep media adapters disabled until a real media engine and end-to-end integration are installed.
-- RTMP/RTSP ingest cannot be enabled alongside authentication until their publish-token handshake is implemented; this is rejected during config validation.
 - Keep WebRTC disabled until `GO-2026-4479` in the Pion DTLS dependency is resolved or formally accepted with compensating controls; the current vulnerability scan reports no upstream fixed version.
 - Validate third-party interoperability, soak/load behavior, backups, and secret rotation in the target environment.
