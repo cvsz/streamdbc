@@ -58,6 +58,9 @@ Optional starter preset: `docs/streamdbc.vmix` opens vMix with one Blank
 program input on Preview/Program and all outputs stopped. It uses only the
 officially documented preset vocabulary; External device, frame rate, output
 size, and starting External are still configured here, not in the preset.
+`scripts/windows/samsung-vmix-setup.ps1` applies everything the vMix API
+allows (transition, preview/program input, master audio, External start)
+and verifies it; run it after opening the preset.
 
 ## 3. Start StreamDBC
 
