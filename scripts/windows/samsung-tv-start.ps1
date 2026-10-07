@@ -2,7 +2,7 @@
 param(
     [string]$ConfigPath = "configs\samsung-f5500.yaml",
     [string]$Executable = "stremdbc.exe",
-    [int]$Port = 8080,
+    [int]$Port = 8081,
     [switch]$SkipDoctor
 )
 
