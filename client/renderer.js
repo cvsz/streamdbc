@@ -348,6 +348,32 @@ async function updateCloudflareDNS() {
   await refreshLanAndDNSStatus();
 }
 
+async function refreshFFmpegInfo() {
+  const info = await API.getFFmpegInfo();
+  if ($('ffmpegStatus')) $('ffmpegStatus').textContent = info?.ok ? 'READY' : 'NOT READY';
+  if ($('ffmpegSource')) $('ffmpegSource').textContent = info?.source || '—';
+  if ($('ffmpegVersion')) $('ffmpegVersion').textContent = info?.version || '—';
+  if ($('ffmpegPath')) $('ffmpegPath').textContent = info?.path || 'Not found';
+  if ($('ffmpegCapabilities')) {
+    $('ffmpegCapabilities').textContent = [
+      `H264:${info?.h264 ? 'yes' : 'no'}`,
+      `AAC:${info?.aac ? 'yes' : 'no'}`,
+      `HLS:${info?.hls ? 'yes' : 'no'}`,
+      `RTMP:${info?.rtmp ? 'yes' : 'no'}`
+    ].join(' · ');
+  }
+  return info;
+}
+
+async function runInstallerDoctor() {
+  $('builderOutput').textContent = 'Running installer Doctor...\n';
+  const result = await API.runSamsungTask('doctor');
+  const output = [result?.stdout, result?.stderr, result?.error].filter(Boolean).join('\n');
+  $('builderOutput').textContent += output || JSON.stringify(result, null, 2);
+  showToast(result?.ok ? 'Doctor passed' : 'Doctor failed', result?.ok ? 'success' : 'error');
+  await refreshFFmpegInfo();
+}
+
 async function refreshServerRuntimeStatus() {
   const status = await API.getServerRuntimeStatus();
   const state = $('runtimeState');
@@ -440,6 +466,7 @@ function init() {
     refreshSamsungStatus();
     refreshServerRuntimeStatus();
     refreshLanAndDNSStatus();
+    refreshFFmpegInfo();
   });
 
   $('refreshBtn').addEventListener('click', refreshData);
@@ -497,6 +524,8 @@ function init() {
   $('openLocalTVBtn').addEventListener('click', () => API.openLocalTV());
   $('updateCloudflareDnsBtn').addEventListener('click', updateCloudflareDNS);
   $('refreshLanBtn').addEventListener('click', refreshLanAndDNSStatus);
+  $('refreshFFmpegBtn').addEventListener('click', refreshFFmpegInfo);
+  $('installerDoctorBtn').addEventListener('click', runInstallerDoctor);
   $('selectWorkspaceBtn').addEventListener('click', selectWorkspace);
   $('clearBuilderOutputBtn').addEventListener('click', () => { $('builderOutput').textContent = 'Ready.'; });
   document.querySelectorAll('[data-tv-action]').forEach(btn => {
