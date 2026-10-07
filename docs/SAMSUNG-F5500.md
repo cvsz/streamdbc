@@ -54,6 +54,11 @@ shows different labels.
 
 Terminology and controls are documented in the [vMix External Output guide](https://www.vmix.com/help27/ExternalOutput1.html), [vMix External Output settings](https://trail.vmix.com/help27/ExternalOutput.html), and [vMix Outputs / NDI settings guide](https://www.vmix.com/help27/SettingsOutputs.html). The **Outputs / NDI** page is not where the primary External button is started.
 
+Optional starter preset: `docs/streamdbc.vmix` opens vMix with one Blank
+program input on Preview/Program and all outputs stopped. It uses only the
+officially documented preset vocabulary; External device, frame rate, output
+size, and starting External are still configured here, not in the preset.
+
 ## 3. Start StreamDBC
 
 From the repository root in PowerShell:

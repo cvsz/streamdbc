@@ -52,6 +52,26 @@ jobs:
           fi
           go mod tidy -diff
 
+      - name: Validate vMix starter preset vocabulary
+        run: |
+          python3 - << 'EOF'
+          import xml.etree.ElementTree as ET
+          root = ET.parse('docs/streamdbc.vmix').getroot()
+          assert root.tag == 'vmix'
+          allowed = {'version','inputs','input','overlays','overlay','preview',
+                     'active','fadeToBlack','transitions','transition',
+                     'recording','external','streaming','playList','multiCorder'}
+          for el in root.iter():
+              if el is not root:
+                  assert el.tag in allowed, f'unverified element: {el.tag}'
+          inputs = root.find('inputs')
+          assert inputs is not None and len(inputs) == 1
+          assert inputs[0].get('type') == 'Blank'
+          for tag in ('recording','external','streaming','playList','multiCorder'):
+              assert root.find(tag).text == 'False', tag
+          print('vMix preset vocabulary OK')
+          EOF
+
       - name: Go unit, race, API, and FFmpeg integration tests
         run: go test -race -coverprofile=coverage.out ./...
 

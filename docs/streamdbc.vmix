@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  streamdbc.vmix — StreamDBC starter preset for the Samsung F5500 Wi-Fi path.
+
+  What this file does:
+    * Opens vMix with one Blank program input ("StreamDBC Program") assigned
+      to Preview (1) and Program/Active (1), four empty overlay channels,
+      and the standard Fade transition selected.
+    * Leaves Recording, External output, Streaming, Playlist and MultiCorder
+      STOPPED so nothing starts capturing or publishing on open.
+
+  What this file does NOT do (configure in vMix, see docs/SAMSUNG-F5500.md):
+    * External Output device ("vMix Video / Streaming"), frame rate and
+      output size, and starting the External output itself. Those are vMix
+      application/output settings: External cog -> Settings -> Output 1 ->
+      "vMix Video / Streaming", then press External to start.
+    * Display master frame rate / output size, streaming destinations,
+      recording paths, or audio mixer levels. They keep vMix defaults.
+
+  Element vocabulary follows the official vMix state XML documented at
+  https://www.vmix.com/help28/DeveloperAPI.html (vmix/version/inputs/
+  overlays/preview/active/fadeToBlack/transitions/recording/external/
+  streaming/playList/multiCorder). No proprietary or unverified elements
+  are used, so any vMix 27+ install opens this preset.
+
+  Usage: in vMix, Open Preset -> select this file, or double-click it.
+-->
+<vmix>
+  <version>27.0.0.0</version>
+  <inputs>
+    <input key="a6faa3dc-e750-4f9a-b3e0-79fc383de2e2" number="1" type="Blank" title="StreamDBC Program" shortTitle="Program" state="Paused" position="0" duration="0" loop="False">
+    </input>
+  </inputs>
+  <overlays>
+    <overlay number="1" />
+    <overlay number="2" />
+    <overlay number="3" />
+    <overlay number="4" />
+  </overlays>
+  <preview>1</preview>
+  <active>1</active>
+  <fadeToBlack>False</fadeToBlack>
+  <transitions>
+    <transition number="1" effect="Fade" duration="500" />
+    <transition number="2" effect="Wipe" duration="500" />
+    <transition number="3" effect="Fly" duration="500" />
+    <transition number="4" effect="CubeZoom" duration="3000" />
+  </transitions>
+  <recording>False</recording>
+  <external>False</external>
+  <streaming>False</streaming>
+  <playList>False</playList>
+  <multiCorder>False</multiCorder>
+</vmix>
