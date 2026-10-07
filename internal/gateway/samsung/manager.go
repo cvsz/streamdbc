@@ -186,7 +186,7 @@ func resolveFFmpeg(configured string) string {
 		}
 	}
 	return ""
-
+}
 
 // compareVersionDirs compares directory names as dot-separated numeric
 // versions, falling back to string comparison for non-numeric segments.
