@@ -323,7 +323,7 @@ function createMainWindow() {
     minWidth: 900,
     minHeight: 600,
     title: 'StreamDBC Control Panel',
-    ...(fs.existsSync(path.join(__dirname, 'assets', 'icon.png')) ? { icon: path.join(__dirname, 'assets', 'icon.png') } : {}),
+    ...(fs.existsSync(path.join(__dirname, 'assets', 'apps.ico')) ? { icon: path.join(__dirname, 'assets', 'apps.ico') } : (fs.existsSync(path.join(__dirname, 'assets', 'icon.png')) ? { icon: path.join(__dirname, 'assets', 'icon.png') } : {})),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -682,10 +682,13 @@ function updateTrayMenu() {
 }
 
 function createTray() {
+  const appIconPath = path.join(__dirname, 'assets', 'apps.ico');
   const pngPath = path.join(__dirname, 'assets', 'tray-icon.png');
   const svgPath = path.join(__dirname, 'assets', 'tray-icon.svg');
   let trayImage = null;
-  if (fs.existsSync(pngPath)) {
+  if (fs.existsSync(appIconPath)) {
+    trayImage = nativeImage.createFromPath(appIconPath);
+  } else if (fs.existsSync(pngPath)) {
     trayImage = nativeImage.createFromPath(pngPath);
   } else if (fs.existsSync(svgPath)) {
     const svg = fs.readFileSync(svgPath);
