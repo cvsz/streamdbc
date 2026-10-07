@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -24,8 +25,14 @@ func newSamsungTestServer(t *testing.T, enableGateway bool) *Server {
 	if enableGateway {
 		// The manager is never started; the executable only needs to
 		// resolve so the /tv/live routes are registered.
-		fake := filepath.Join(t.TempDir(), "fake-ffmpeg")
-		if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		name := "fake-ffmpeg"
+		contents := "#!/bin/sh\nexit 0\n"
+		if runtime.GOOS == "windows" {
+			name = "fake-ffmpeg.cmd"
+			contents = "@echo off\r\nexit /b 0\r\n"
+		}
+		fake := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(fake, []byte(contents), 0o700); err != nil {
 			t.Fatal(err)
 		}
 		cfg.FFmpegPath = fake
