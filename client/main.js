@@ -9,7 +9,7 @@ let mainWindow = null;
 let tray = null;
 let playerWindow = null;
 let settings = {
-  serverUrl: 'http://localhost:8085',
+  serverUrl: 'http://127.0.0.1:8081',
   autoStart: false,
   notifications: true,
   minimizeToTray: true,
