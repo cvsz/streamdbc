@@ -150,3 +150,7 @@ See also:
 - `SAMSUNG-F5500.md`
 - `USER-MANUAL.md`
 - `API.md`
+
+## Branding
+
+The Windows application icon is generated reproducibly from the Zeazdev logo source embedded in `client/scripts/generate-windows-icon.js`. The build writes `client/assets/apps.ico`, and electron-builder applies it to the application executable, NSIS installer, uninstaller, portable build, main window and tray icon.
