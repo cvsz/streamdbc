@@ -56,7 +56,7 @@ jobs:
         shell: bash
         run: |
           grep -q 'http_port: 8081' configs/samsung-f5500.yaml
-          grep -q 'http://192.168.1.100:8081/tv/' client/samsung-f5500-legacy/index.html
+          grep -q 'http://ztv.zeaz.dev:8081/tv/' client/samsung-f5500-legacy/index.html
           grep -q '<fullwidget itemtype="boolean">y</fullwidget>' client/samsung-f5500-legacy/config.xml
           grep -q 'src="/tv/live/index.m3u8"' web/tv/index.html
           if grep -q '<video[^>]*controls' web/tv/index.html web/tv/basic.html; then
