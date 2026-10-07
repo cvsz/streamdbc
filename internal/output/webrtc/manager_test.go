@@ -3,6 +3,7 @@ package webrtc
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/cvsz/stremdbc/internal/config"
@@ -54,5 +55,17 @@ func TestWebRTCOutputCopiesICEServerURLs(t *testing.T) {
 	cfg.ICEServer.URLs[0] = "stun:changed.example.com:3478"
 	if got := manager.config.ICEServer.URLs[0]; got != "stun:stun.example.com:3478" {
 		t.Fatalf("WebRTC output retained mutable ICE configuration: %q", got)
+	}
+}
+
+
+func TestWebRTCOutputLogSafeValueRejectsInjection(t *testing.T) {
+	input := "remote\r\nlevel=error\tspoof\u2028next" + strings.Repeat("x", maxOutputLogValueRunes+100)
+	got := logSafeOutputValue(input)
+	if strings.ContainsAny(got, "\r\n\t") || strings.ContainsRune(got, '\u2028') || strings.ContainsRune(got, '\u2029') {
+		t.Fatalf("logSafeOutputValue left a record separator: %q", got)
+	}
+	if len([]rune(got)) > maxOutputLogValueRunes+1 {
+		t.Fatalf("logSafeOutputValue returned %d runes, want bounded output", len([]rune(got)))
 	}
 }
