@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, dialog, shell, powerSaveBlocker, safeStorage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, dialog, shell, powerSaveBlocker, safeStorage, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -413,12 +413,21 @@ function updateTrayMenu() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
-  if (!fs.existsSync(iconPath)) {
+  const pngPath = path.join(__dirname, 'assets', 'tray-icon.png');
+  const svgPath = path.join(__dirname, 'assets', 'tray-icon.svg');
+  let trayImage = null;
+  if (fs.existsSync(pngPath)) {
+    trayImage = nativeImage.createFromPath(pngPath);
+  } else if (fs.existsSync(svgPath)) {
+    const svg = fs.readFileSync(svgPath);
+    trayImage = nativeImage.createFromDataURL(`data:image/svg+xml;base64,${svg.toString('base64')}`);
+  }
+  if (!trayImage || trayImage.isEmpty()) {
+    console.error('System tray icon is unavailable');
     return;
   }
 
-  tray = new Tray(iconPath);
+  tray = new Tray(trayImage.resize({ width: 16, height: 16 }));
   tray.setToolTip('StreamDBC Server & Control Panel');
   updateTrayMenu();
 
