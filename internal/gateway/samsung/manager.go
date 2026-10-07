@@ -147,29 +147,48 @@ func resolveFFmpeg(configured string) string {
 
 	// The Windows Control Panel sets this to its bundled runtime before
 	// starting the server, making the bundled verified build the first choice.
+	// Treat the environment value as an explicit executable path, normalize it,
+	// and let exec.LookPath validate that it resolves to an executable instead
+	// of passing tainted path text directly to filesystem operations.
 	if bundled := strings.TrimSpace(os.Getenv("STREMDBC_FFMPEG_PATH")); bundled != "" {
-		if info, err := os.Stat(bundled); err == nil && !info.IsDir() {
-			return bundled
+		cleanBundled := filepath.Clean(bundled)
+		base := strings.ToLower(filepath.Base(cleanBundled))
+		if (base == "ffmpeg.exe" || base == "ffmpeg") && filepath.IsAbs(cleanBundled) {
+			if resolved, err := exec.LookPath(cleanBundled); err == nil {
+				return resolved
+			}
 		}
 	}
 
-	localAppData := os.Getenv("LOCALAPPDATA")
+	localAppData := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
 	if localAppData != "" {
-		managedRoot := filepath.Join(localAppData, "StreamDBC", "FFmpeg")
+		managedRoot := filepath.Clean(filepath.Join(localAppData, "StreamDBC", "FFmpeg"))
 		entries, err := os.ReadDir(managedRoot)
 		if err == nil {
 			names := make([]string, 0, len(entries))
 			for _, entry := range entries {
-				if entry.IsDir() {
-					names = append(names, entry.Name())
+				name := entry.Name()
+				if !entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+					continue
 				}
+				// ReadDir names should be single path elements; enforce that
+				// invariant explicitly before joining them under managedRoot.
+				if name == "." || name == ".." || filepath.Base(name) != name ||
+					strings.ContainsAny(name, `/\`) {
+					continue
+				}
+				names = append(names, name)
 			}
 			sort.Slice(names, func(i, j int) bool { return compareVersionDirs(names[i], names[j]) > 0 })
 			for _, name := range names {
 				for _, candidate := range []string{"ffmpeg.exe", "ffmpeg"} {
-					candidatePath := filepath.Join(managedRoot, name, candidate)
-					if info, err := os.Stat(candidatePath); err == nil && !info.IsDir() {
-						return candidatePath
+					candidatePath := filepath.Clean(filepath.Join(managedRoot, name, candidate))
+					rel, err := filepath.Rel(managedRoot, candidatePath)
+					if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+						continue
+					}
+					if resolved, err := exec.LookPath(candidatePath); err == nil {
+						return resolved
 					}
 				}
 			}
