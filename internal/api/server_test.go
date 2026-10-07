@@ -569,3 +569,17 @@ func TestAuditLogRecordsMutationStatusAndPath(t *testing.T) {
 		t.Fatalf("audit status = %v", fields["status"])
 	}
 }
+
+func TestLogSafeValueStripsRecordSeparatorsAndBoundsLength(t *testing.T) {
+	input := "GET\r\nFAKE=1\tX\u2028Y\u2029Z" + strings.Repeat("a", maxLogValueRunes+100)
+	got := logSafeValue(input)
+	if strings.ContainsAny(got, "\r\n\t") || strings.ContainsRune(got, '\u2028') || strings.ContainsRune(got, '\u2029') {
+		t.Fatalf("logSafeValue left a record separator: %q", got)
+	}
+	if !strings.Contains(got, "\\r") || !strings.Contains(got, "\\n") {
+		t.Fatalf("logSafeValue did not visibly escape CR/LF: %q", got)
+	}
+	if len([]rune(got)) > maxLogValueRunes+1 {
+		t.Fatalf("logSafeValue returned %d runes, want at most %d plus ellipsis", len([]rune(got)), maxLogValueRunes)
+	}
+}
