@@ -4,6 +4,7 @@ const fs = require('fs');
 const https = require('https');
 const http = require('http');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 
 let mainWindow = null;
 let tray = null;
@@ -19,6 +20,9 @@ let settings = {
 
 const STREAMDBC_SERVER_PORT = 1935;
 let apiKey = '';
+let serverProcess = null;
+let serverRuntimeLastError = '';
+
 
 function getSettingsPath() {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -26,6 +30,30 @@ function getSettingsPath() {
 
 function getCredentialPath() {
   return path.join(app.getPath('userData'), 'credentials.json');
+}
+
+function getRuntimeSecretPath() {
+  return path.join(app.getPath('userData'), 'runtime-secret.json');
+}
+
+function getOrCreateRuntimeJWTSecret() {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Windows credential encryption is unavailable');
+  }
+  try {
+    if (fs.existsSync(getRuntimeSecretPath())) {
+      const payload = JSON.parse(fs.readFileSync(getRuntimeSecretPath(), 'utf8'));
+      if (payload.version === 1 && typeof payload.secret === 'string') {
+        return safeStorage.decryptString(Buffer.from(payload.secret, 'base64'));
+      }
+    }
+  } catch {
+    console.error('Failed to load runtime JWT secret; generating a replacement');
+  }
+  const secret = crypto.randomBytes(48).toString('base64url');
+  const encrypted = safeStorage.encryptString(secret).toString('base64');
+  fs.writeFileSync(getRuntimeSecretPath(), JSON.stringify({ version: 1, secret: encrypted }), { mode: 0o600 });
+  return secret;
 }
 
 function publicSettings() {
@@ -190,6 +218,200 @@ function createPlayerWindow(streamId) {
   });
 }
 
+
+function resolveServerRuntime() {
+  const candidates = [];
+  if (app.isPackaged) {
+    candidates.push({
+      source: 'bundled',
+      executable: path.join(process.resourcesPath, 'server-runtime', 'stremdbc.exe'),
+      config: path.join(process.resourcesPath, 'server-runtime', 'configs', 'samsung-f5500.yaml'),
+      cwd: path.join(process.resourcesPath, 'server-runtime')
+    });
+  }
+  const workspace = String(settings.workspacePath || '').trim();
+  if (workspace) {
+    candidates.push({
+      source: 'workspace',
+      executable: path.join(workspace, 'stremdbc.exe'),
+      config: path.join(workspace, 'configs', 'samsung-f5500.yaml'),
+      cwd: workspace
+    });
+  }
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    const installed = path.join(process.env.LOCALAPPDATA, 'StreamDBC');
+    candidates.push({
+      source: 'localappdata',
+      executable: path.join(installed, 'stremdbc.exe'),
+      config: workspace ? path.join(workspace, 'configs', 'samsung-f5500.yaml') : '',
+      cwd: installed
+    });
+  }
+  return candidates.find((candidate) =>
+    fs.existsSync(candidate.executable) &&
+    candidate.config &&
+    fs.existsSync(candidate.config)
+  ) || null;
+}
+
+async function getServerRuntimeStatus() {
+  const health = await requestJson('GET', settings.serverUrl, '/health');
+  const runtime = resolveServerRuntime();
+  const managedPid = serverProcess && !serverProcess.killed ? serverProcess.pid : null;
+  return {
+    running: Boolean(health && health.ok && health.body?.status === 'healthy'),
+    managedPid,
+    executable: runtime?.executable || '',
+    config: runtime?.config || '',
+    source: runtime?.source || '',
+    lastError: serverRuntimeLastError
+  };
+}
+
+async function waitForServerHealth(timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const health = await requestJson('GET', settings.serverUrl, '/health');
+    if (health?.ok && health.body?.status === 'healthy') return true;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
+async function startServerRuntime() {
+  if (process.platform !== 'win32') return { ok: false, error: 'Server runtime control is Windows-only.' };
+  const current = await getServerRuntimeStatus();
+  if (current.running) return { ok: true, alreadyRunning: true, status: current };
+
+  const runtime = resolveServerRuntime();
+  if (!runtime) {
+    return { ok: false, error: 'No usable stremdbc.exe + samsung-f5500.yaml runtime was found. Select the repository or install the bundled Control Panel build.' };
+  }
+
+  let jwtSecret;
+  try {
+    jwtSecret = process.env.STREMDBC_JWT_SECRET || getOrCreateRuntimeJWTSecret();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+  const runtimeApiKey = apiKey || process.env.STREMDBC_API_KEY || '';
+  if (!runtimeApiKey) {
+    return { ok: false, error: 'Set the API key in Settings before starting the bundled StreamDBC server.' };
+  }
+
+  serverRuntimeLastError = '';
+  serverProcess = spawn(runtime.executable, ['-config', runtime.config], {
+    cwd: runtime.cwd,
+    windowsHide: true,
+    detached: false,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      STREMDBC_JWT_SECRET: jwtSecret,
+      STREMDBC_API_KEY: runtimeApiKey
+    }
+  });
+  serverProcess.once('error', (err) => {
+    serverRuntimeLastError = err.message;
+    serverProcess = null;
+    updateTrayMenu();
+  });
+  serverProcess.once('exit', (code, signal) => {
+    if (code && code !== 0) serverRuntimeLastError = `stremdbc.exe exited with code ${code}`;
+    if (signal) serverRuntimeLastError = `stremdbc.exe exited after signal ${signal}`;
+    serverProcess = null;
+    updateTrayMenu();
+  });
+
+  const healthy = await waitForServerHealth();
+  updateTrayMenu();
+  if (!healthy) {
+    return { ok: false, error: serverRuntimeLastError || 'StreamDBC server did not become healthy before timeout.' };
+  }
+  createNotification('StreamDBC', 'Server is running on port 8081');
+  return { ok: true, status: await getServerRuntimeStatus() };
+}
+
+async function stopServerRuntime() {
+  const health = await requestJson('GET', settings.serverUrl, '/health');
+  if (!health?.ok) {
+    if (serverProcess && !serverProcess.killed) {
+      try { serverProcess.kill(); } catch {}
+      serverProcess = null;
+    }
+    updateTrayMenu();
+    return { ok: true, alreadyStopped: true, status: await getServerRuntimeStatus() };
+  }
+
+  if (serverProcess && !serverProcess.killed) {
+    try {
+      serverProcess.kill();
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+    serverProcess = null;
+  } else {
+    const workspace = String(settings.workspacePath || '').trim();
+    if (workspace) {
+      const scriptPath = path.join(workspace, 'scripts', 'windows', 'samsung-tv-stop.ps1');
+      if (fs.existsSync(scriptPath)) {
+        await runSamsungWorkspaceTask('stop');
+      }
+    }
+    return { ok: false, error: 'Server is running but was not launched by this Control Panel. Stop that process from its owning session or select the StreamDBC workspace.' };
+  }
+
+  updateTrayMenu();
+  return { ok: true, status: await getServerRuntimeStatus() };
+}
+
+async function restartServerRuntime() {
+  const status = await getServerRuntimeStatus();
+  if (status.running && status.managedPid) {
+    const stopped = await stopServerRuntime();
+    if (!stopped.ok) return stopped;
+    await new Promise((resolve) => setTimeout(resolve, 750));
+  } else if (status.running) {
+    return { ok: false, error: 'The running StreamDBC server is not managed by this Control Panel. Stop it first, then use Start Server.' };
+  }
+  return startServerRuntime();
+}
+
+function openLocalControlPanel() {
+  const target = new URL('/dashboard/', settings.serverUrl).toString();
+  return shell.openExternal(target);
+}
+
+function openLocalTVPage() {
+  const target = new URL('/tv/', settings.serverUrl).toString();
+  return shell.openExternal(target);
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const running = Boolean(serverProcess && !serverProcess.killed);
+  const contextMenu = Menu.buildFromTemplate([
+    { label: 'Open StreamDBC Control Panel', click: () => { mainWindow?.show(); mainWindow?.focus(); } },
+    { label: 'Open Web Dashboard', click: () => { void openLocalControlPanel(); } },
+    { label: 'Open Samsung TV Page', click: () => { void openLocalTVPage(); } },
+    { type: 'separator' },
+    { label: running ? 'Server Running' : 'Start Server', enabled: !running, click: () => { void startServerRuntime(); } },
+    { label: 'Restart Server', click: () => { void restartServerRuntime(); } },
+    { label: 'Stop Server', enabled: running, click: () => { void stopServerRuntime(); } },
+    { type: 'separator' },
+    { label: 'Settings', click: () => { mainWindow?.show(); mainWindow?.webContents.send('open-settings'); } },
+    { type: 'separator' },
+    {
+      label: 'Quit Control Panel',
+      click: () => {
+        app.isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+  tray.setContextMenu(contextMenu);
+}
+
 function createTray() {
   const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
   if (!fs.existsSync(iconPath)) {
@@ -197,41 +419,8 @@ function createTray() {
   }
 
   tray = new Tray(iconPath);
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: 'Open Dashboard',
-      click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-        }
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Settings',
-      click: () => {
-        mainWindow?.webContents.send('open-settings');
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Check for Updates',
-      click: () => {
-        mainWindow?.webContents.send('check-updates');
-      }
-    },
-    { type: 'separator' },
-    {
-      label: 'Quit',
-      click: () => {
-        app.isQuitting = true;
-        app.quit();
-      }
-    }
-  ]);
-
-  tray.setToolTip('STREMDBC Client');
-  tray.setContextMenu(contextMenu);
+  tray.setToolTip('StreamDBC Server & Control Panel');
+  updateTrayMenu();
 
   tray.on('click', () => {
     if (mainWindow) {
@@ -748,6 +937,27 @@ ipcMain.handle('select-workspace', async () => {
 
 ipcMain.handle('fetch-samsung-status', async (event, serverUrl) => {
   return await fetchSamsungStatus(serverUrl || settings.serverUrl);
+});
+
+ipcMain.handle('get-server-runtime-status', async () => {
+  return await getServerRuntimeStatus();
+});
+
+ipcMain.handle('server-runtime-action', async (event, action) => {
+  if (action === 'start') return await startServerRuntime();
+  if (action === 'stop') return await stopServerRuntime();
+  if (action === 'restart') return await restartServerRuntime();
+  return { ok: false, error: 'Unsupported server runtime action.' };
+});
+
+ipcMain.handle('open-local-dashboard', async () => {
+  await openLocalControlPanel();
+  return true;
+});
+
+ipcMain.handle('open-local-tv', async () => {
+  await openLocalTVPage();
+  return true;
 });
 
 ipcMain.handle('samsung-action', async (event, { serverUrl, action }) => {
