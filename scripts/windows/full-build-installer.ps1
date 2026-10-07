@@ -36,7 +36,11 @@ if (-not $NoClean -and (Test-Path $DistDir)) {
 
 Push-Location $ClientDir
 try {
-    Invoke-Step 'Install locked Node dependencies' { npm ci }
+    # electron-builder v26 pulls global-agent -> roarr -> sprintf-js only through
+    # an optional proxy-support dependency. CVE-2026-97058 has no patched
+    # sprintf-js release, so omit optional packages instead of force-changing
+    # the locked build toolchain.
+    Invoke-Step 'Install locked Node dependencies' { npm ci --omit=optional }
 
     if (-not $SkipTests) {
         Push-Location $RepoRoot
@@ -47,7 +51,7 @@ try {
             Pop-Location
         }
 
-        Invoke-Step 'NPM security audit' { npm audit --audit-level=high }
+        Invoke-Step 'NPM security audit' { npm audit --omit=optional --audit-level=moderate }
         Invoke-Step 'JavaScript syntax checks' {
             node --check main.js
             node --check preload.js
