@@ -15,7 +15,9 @@ import (
 
 func testRecorder(t *testing.T) *Manager {
 	t.Helper()
-	if runtime.GOOS == "windows" { t.Skip("fake POSIX FFmpeg fixture is covered on Linux CI") }
+	if runtime.GOOS == "windows" {
+		t.Skip("fake POSIX FFmpeg fixture is covered on Linux CI")
+	}
 	ffmpeg := filepath.Join(t.TempDir(), "fake-ffmpeg")
 	if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\ncase \"$*\" in *-encoders*) exit 0;; esac\nprintf test-output > \"$last\"\n"), 0o700); err != nil {
 		t.Fatalf("write fake ffmpeg: %v", err)
@@ -32,7 +34,9 @@ func testRecorder(t *testing.T) *Manager {
 }
 
 func TestRecorderFailsWhenFFmpegProducesNoOutput(t *testing.T) {
-	if runtime.GOOS == "windows" { t.Skip("/bin/true fixture is POSIX-only") }
+	if runtime.GOOS == "windows" {
+		t.Skip("/bin/true fixture is POSIX-only")
+	}
 	manager, err := NewManager(&config.RecorderConfig{Enable: true, Path: t.TempDir(), FFmpegPath: "/bin/true"}, zap.NewNop())
 	if err != nil {
 		t.Fatalf("new recorder: %v", err)
