@@ -144,3 +144,17 @@ func TestWebRTCWHEPRequiresPlayToken(t *testing.T) {
 		t.Fatalf("authorized WHEP request returned %d: %s", response.Code, response.Body.String())
 	}
 }
+
+func TestLogSafeValueRejectsWebRTCLogInjection(t *testing.T) {
+	input := "codec\r\nlevel=error\tspoof\u2028next" + strings.Repeat("b", maxLogValueRunes+100)
+	got := logSafeValue(input)
+	if strings.ContainsAny(got, "\r\n\t") || strings.ContainsRune(got, '\u2028') || strings.ContainsRune(got, '\u2029') {
+		t.Fatalf("logSafeValue left a record separator: %q", got)
+	}
+	if !strings.Contains(got, "\\r") || !strings.Contains(got, "\\n") {
+		t.Fatalf("logSafeValue did not visibly escape CR/LF: %q", got)
+	}
+	if len([]rune(got)) > maxLogValueRunes+1 {
+		t.Fatalf("logSafeValue returned %d runes, want bounded output", len([]rune(got)))
+	}
+}
