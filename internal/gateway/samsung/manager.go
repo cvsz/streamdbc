@@ -1,7 +1,6 @@
 package samsung
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +25,10 @@ const (
 	StateFailed     = "FAILED"
 
 	maxBackoff = 30 * time.Second
+
+	// maxStderrBytes caps retained FFmpeg diagnostics to the most recent
+	// output, which is where the actionable failure detail lives.
+	maxStderrBytes = 64 * 1024
 )
 
 var (
@@ -47,7 +50,9 @@ type commandRunner struct{}
 type commandProcess struct {
 	cmd         *exec.Cmd
 	stdinWriter *os.File
-	stderrBuf   *bytes.Buffer
+	// stderrBuf keeps only the tail of FFmpeg diagnostics so a chatty child
+	// cannot grow manager memory without bound over long runs.
+	stderrBuf *tailBuffer
 }
 
 func (commandRunner) Start(ctx context.Context, executable string, args []string) (process, error) {
@@ -59,8 +64,9 @@ func (commandRunner) Start(ctx context.Context, executable string, args []string
 	}
 	cmd.Stdin = stdinReader
 	cmd.Stdout = nil
-	// Capture stderr for debugging
-	stderrBuf := new(bytes.Buffer)
+	// Capture the tail of stderr for debugging; the buffer is capped so a
+	// long-lived FFmpeg process cannot exhaust memory with diagnostics.
+	stderrBuf := &tailBuffer{limit: maxStderrBytes}
 	cmd.Stderr = stderrBuf
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Cancel = func() error {
@@ -387,6 +393,35 @@ func (m *Manager) run(ctx context.Context, gen uint64, done chan struct{}) {
 		}
 		attempt++
 	}
+}
+
+// tailBuffer retains only the most recent bytes written to it.
+type tailBuffer struct {
+	mu    sync.Mutex
+	data  []byte
+	limit int
+}
+
+func (b *tailBuffer) Write(data []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	originalLength := len(data)
+	if b.limit > 0 {
+		if len(data) > b.limit {
+			data = data[len(data)-b.limit:]
+		}
+		b.data = append(b.data, data...)
+		if len(b.data) > b.limit {
+			b.data = append([]byte(nil), b.data[len(b.data)-b.limit:]...)
+		}
+	}
+	return originalLength, nil
+}
+
+func (b *tailBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.data)
 }
 
 func (m *Manager) setState(gen uint64, state string) {

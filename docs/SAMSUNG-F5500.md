@@ -155,6 +155,8 @@ long-running soak.
   HLS URL. Confirm `/api/v1/tv/status` reports `live` and `playlist_ready`.
 - If the TV cannot connect, verify the PC's LAN IP, same subnet, Private
   network profile, TCP 8080 rule, and router client-isolation setting.
+  A plain-text `GET /tv/ping` (expect `pong`) checks basic reachability
+  before involving HLS at all.
 - If decode is unstable, edit the profile to use a lower video bitrate while
   retaining 1280x720, 25/30 fps, H.264 Main/Baseline-compatible output,
   AAC-LC, and two-second MPEG-TS segments. Re-run config validation and the
