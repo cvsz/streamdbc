@@ -215,19 +215,56 @@ async function discoverFleet(localIP, timeoutMs = 4500) {
     if (device) descriptions.push(device);
   }
 
-  const byIP = new Map();
+  const groups = new Map();
   for (const d of descriptions) {
-    const existing = byIP.get(d.ip);
-    if (!existing) {
-      byIP.set(d.ip, d);
-      continue;
-    }
-    const score = (x) => Number(x.capabilities.avTransport) * 8 + Number(x.capabilities.mainTVAgent2) * 4 +
-      Number(x.capabilities.mediaRenderer) * 2 + x.services.length;
-    if (score(d) > score(existing)) byIP.set(d.ip, d);
+    if (!groups.has(d.ip)) groups.set(d.ip, []);
+    groups.get(d.ip).push(d);
   }
 
-  return [...byIP.values()].sort((a, b) =>
+  const merged = [];
+  for (const [ip, group] of groups.entries()) {
+    const services = [];
+    const seenServices = new Set();
+    for (const d of group) {
+      for (const svc of d.services || []) {
+        const key = svc.serviceType + '|' + svc.controlURL;
+        if (seenServices.has(key)) continue;
+        seenServices.add(key);
+        services.push(svc);
+      }
+    }
+    const byType = (type) => services.find((svc) => svc.serviceType === type);
+    const identity = group.find((d) => d.modelName) || group[0];
+    const deviceTypes = [...new Set(group.map((d) => d.deviceType).filter(Boolean))];
+    merged.push({
+      ip,
+      location: identity.location,
+      locations: [...new Set(group.map((d) => d.location))],
+      friendlyName: group.find((d) => d.friendlyName && !/^Samsung TV$/i.test(d.friendlyName))?.friendlyName || identity.friendlyName,
+      modelName: identity.modelName,
+      modelDescription: identity.modelDescription,
+      udn: identity.udn,
+      productCap: group.find((d) => d.productCap)?.productCap || identity.productCap,
+      deviceType: identity.deviceType,
+      deviceTypes,
+      server: identity.server,
+      services,
+      capabilities: {
+        mediaRenderer: deviceTypes.includes('urn:schemas-upnp-org:device:MediaRenderer:1'),
+        avTransport: Boolean(byType(SERVICE.av)),
+        renderingControl: Boolean(byType(SERVICE.rendering)),
+        connectionManager: Boolean(byType(SERVICE.connection)),
+        mainTVAgent2: Boolean(byType(SERVICE.mainTv)),
+        setAVTransportURI: Boolean(byType(SERVICE.av)?.actions.includes('SetAVTransportURI')),
+        play: Boolean(byType(SERVICE.av)?.actions.includes('Play')),
+        stop: Boolean(byType(SERVICE.av)?.actions.includes('Stop')),
+        pause: Boolean(byType(SERVICE.av)?.actions.includes('Pause')),
+        runBrowser: Boolean(byType(SERVICE.mainTv)?.actions.includes('RunBrowser'))
+      }
+    });
+  }
+
+  return merged.sort((a, b) =>
     a.ip.localeCompare(b.ip, undefined, { numeric: true })
   );
 }
