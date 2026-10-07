@@ -58,7 +58,6 @@ func TestWebRTCOutputCopiesICEServerURLs(t *testing.T) {
 	}
 }
 
-
 func TestWebRTCOutputLogSafeValueRejectsInjection(t *testing.T) {
 	input := "remote\r\nlevel=error\tspoof\u2028next" + strings.Repeat("x", maxOutputLogValueRunes+100)
 	got := logSafeOutputValue(input)
