@@ -37,7 +37,7 @@ try {
 
 if (-not $healthy) {
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw "StreamDBC executable not found: $Executable. Build it with go build -o stremdbc.exe ./cmd/stremdbc" }
-    $process = Start-Process -FilePath $Executable -ArgumentList @("-config", ('"{0}"' -f $ConfigPath)) -WorkingDirectory $repoRoot -PassThru
+    $process = Start-Process -FilePath $Executable -ArgumentList @("-config", $ConfigPath) -WorkingDirectory $repoRoot -PassThru
     $newProcess = $true
     New-Item -ItemType Directory -Path $pidDirectory -Force | Out-Null
     Set-Content -LiteralPath $pidFile -Value $process.Id -NoNewline

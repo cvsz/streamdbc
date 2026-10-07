@@ -29,8 +29,8 @@ const (
 )
 
 var (
-	ErrStreamKeyMissing = errors.New("RTMP publish stream key is missing")
-	ErrUnsupportedMedia = errors.New("RTMP media forwarding is not configured")
+	ErrStreamKeyMissing = errors.New("RTMP publish stream key is missing; RTMP media ingest is unsupported, use the Samsung DirectShow (vMix Video/Audio) to HLS gateway instead")
+	ErrUnsupportedMedia = errors.New("RTMP media forwarding is unsupported and rejected; do not push RTMP to :1935, use the Samsung DirectShow (vMix Video/Audio) to HLS gateway")
 	ErrMessageTooLarge  = errors.New("RTMP message exceeds configured limit")
 	ErrUnauthorized     = errors.New("RTMP publish token rejected")
 )
@@ -117,7 +117,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.listener = listener
 	s.running = true
 	s.mu.Unlock()
-	s.logger.Info("RTMP server started", zap.String("address", listener.Addr().String()))
+	s.logger.Info("RTMP server started (control/handshake only; media is rejected, use Samsung DirectShow to HLS)", zap.String("address", listener.Addr().String()))
 
 	s.acceptWG.Add(1)
 	go func() {

@@ -57,6 +57,7 @@ func BuildArgs(cfg config.SamsungTVConfig) ([]string, error) {
 		"-profile:v", "baseline",
 		"-level:v", level,
 		"-pix_fmt", "yuv420p",
+		"-vf", fmt.Sprintf("scale=%d:%d", cfg.Width, cfg.Height),
 		"-r", strconv.Itoa(cfg.FrameRate),
 		"-g", strconv.Itoa(gop),
 		"-keyint_min", strconv.Itoa(gop),

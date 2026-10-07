@@ -137,7 +137,12 @@ curl http://localhost:8085/api/v1/streams/my-first-stream
 
 ### Push Media via RTMP
 
-From any RTMP encoder (OBS, vMix, ffmpeg):
+> **Unsupported:** the bundled RTMP adapter is control/handshake only; audio/video
+> is rejected (`ErrUnsupportedMedia`). Do not push encoders to `:1935`.
+> For vMix use External Output 1 -> DirectShow `vMix Video`/`vMix Audio` ->
+> Samsung HLS (`configs/samsung-f5500.yaml`, `docs/SAMSUNG-F5500.md`).
+
+From any RTMP encoder (OBS, vMix, ffmpeg) — control handshake test only, no media forwarding:
 
 ```
 rtmp://localhost:1935/my-first-stream

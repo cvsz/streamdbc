@@ -91,7 +91,7 @@ enumerated `vMix Video` and `vMix Audio` devices. The DirectShow device names
 are configurable in `configs/samsung-f5500.yaml` if the installed vMix version
 shows different labels.
 
-Terminology and controls are documented in the [vMix External Output guide](https://www.vmix.com/help27/ExternalOutput1.html), [vMix External Output settings](https://trail.vmix.com/help27/ExternalOutput.html), and [vMix Outputs / NDI settings guide](https://www.vmix.com/help27/SettingsOutputs.html). The **Outputs / NDI** page is not where the primary External button is started.
+Terminology and controls are documented in the [vMix External Output guide](https://www.vmix.com/help27/ExternalOutput1.html), [vMix External Output settings](https://www.vmix.com/help27/ExternalOutput.html), and [vMix Outputs / NDI settings guide](https://www.vmix.com/help27/SettingsOutputs.html). The **Outputs / NDI** page is not where the primary External button is started.
 
 Optional starter preset: `docs/streamdbc.vmix` opens vMix with one Blank
 program input on Preview/Program and all outputs stopped. It uses only the
