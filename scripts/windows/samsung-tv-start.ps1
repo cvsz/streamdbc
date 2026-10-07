@@ -24,7 +24,7 @@ if ($resolvedFFmpeg) {
 }
 
 if (-not $SkipDoctor) {
-    & (Join-Path $PSScriptRoot "samsung-tv-doctor.ps1") -Port $Port -AllowPortInUse
+    & (Join-Path $PSScriptRoot "samsung-tv-doctor.ps1") -Port $Port -AllowPortInUse -RequireVMix
     if ($LASTEXITCODE -ne 0) { throw "Samsung TV doctor failed; fix the reported checks first." }
 }
 
