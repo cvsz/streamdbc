@@ -24,6 +24,30 @@ import (
 )
 
 const maxSDPSize = 1 << 20
+const maxLogValueRunes = 512
+
+// logSafeValue prevents request/config-derived values from injecting log
+// record separators while retaining enough context for operations.
+func logSafeValue(value string) string {
+	value = strings.NewReplacer(
+		"\r", "\\r",
+		"\n", "\\n",
+		"\t", "\\t",
+		"\u2028", "\\u2028",
+		"\u2029", "\\u2029",
+	).Replace(value)
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	runes := []rune(value)
+	if len(runes) > maxLogValueRunes {
+		return string(runes[:maxLogValueRunes]) + "…"
+	}
+	return value
+}
 
 // Server represents a WebRTC server supporting WHIP/WHEP control exchanges.
 // It negotiates peer connections and receives publisher tracks, but forwarding
@@ -174,7 +198,7 @@ func (s *Server) Start(ctx context.Context) error {
 	s.httpServer = server
 	s.running = true
 	s.mu.Unlock()
-	s.logger.Info("WebRTC server started", zap.String("address", listener.Addr().String()), zap.Bool("tls", s.config.TLSEnabled))
+	s.logger.Info("WebRTC server started", zap.String("address", logSafeValue(listener.Addr().String())), zap.Bool("tls", s.config.TLSEnabled))
 	serveDone := make(chan struct{})
 	go func() {
 		var serveErr error
@@ -184,7 +208,7 @@ func (s *Server) Start(ctx context.Context) error {
 			serveErr = server.Serve(listener)
 		}
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) && !errors.Is(serveErr, net.ErrClosed) {
-			s.logger.Error("WebRTC server failed", zap.Error(serveErr))
+			s.logger.Error("WebRTC server failed", zap.String("error", logSafeValue(serveErr.Error())))
 		}
 		s.finishServe(server)
 		close(serveDone)
@@ -326,7 +350,7 @@ func (s *Server) handleWHIP(c *gin.Context) {
 		return
 	}
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		s.logger.Info("received WebRTC publisher track", zap.String("codec", track.Codec().MimeType))
+		s.logger.Info("received WebRTC publisher track", zap.String("codec", logSafeValue(track.Codec().MimeType)))
 		s.setLiveIfAvailable(streamID)
 	})
 	if err := pc.SetRemoteDescription(offer); err != nil {

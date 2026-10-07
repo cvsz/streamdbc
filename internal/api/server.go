@@ -65,6 +65,32 @@ type rateEntry struct {
 	count       int
 }
 
+const maxLogValueRunes = 512
+
+// logSafeValue prevents untrusted values from forging additional log records.
+// Keep sanitization immediately before structured logging so static analysis can
+// prove that CR/LF and other record-separator controls cannot reach the sink.
+func logSafeValue(value string) string {
+	value = strings.NewReplacer(
+		"\r", "\\r",
+		"\n", "\\n",
+		"\t", "\\t",
+		"\u2028", "\\u2028",
+		"\u2029", "\\u2029",
+	).Replace(value)
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	runes := []rune(value)
+	if len(runes) > maxLogValueRunes {
+		return string(runes[:maxLogValueRunes]) + "…"
+	}
+	return value
+}
+
 func NewServer(cfg *config.APIConfig, registry *core.StreamRegistry, m *metrics.Metrics, logger *zap.Logger) *Server {
 	if cfg == nil {
 		cfg = &config.APIConfig{Enable: true, BasePath: "/api/v1", CORSOrigins: []string{"*"}}
@@ -470,7 +496,10 @@ func (s *Server) registerRoute(pattern string, handler http.Handler) (registered
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			s.logger.Warn("HTTP route registration rejected", zap.String("pattern", pattern), zap.Any("panic", recovered))
+			s.logger.Warn("HTTP route registration rejected",
+				zap.String("pattern", logSafeValue(pattern)),
+				zap.String("panic", logSafeValue(fmt.Sprint(recovered))),
+			)
 			registered = false
 		}
 	}()
@@ -651,7 +680,7 @@ func (s *Server) Start(addr string) error {
 	if err != nil {
 		return err
 	}
-	s.logger.Info("API server started", zap.String("address", addr))
+	s.logger.Info("API server started", zap.String("address", logSafeValue(addr)))
 	return s.serve(server, listener)
 }
 
@@ -665,7 +694,7 @@ func (s *Server) StartAsync(addr string) (<-chan error, error) {
 		return nil, err
 	}
 	errCh := make(chan error, 1)
-	s.logger.Info("API server started", zap.String("address", addr))
+	s.logger.Info("API server started", zap.String("address", logSafeValue(addr)))
 	go func() {
 		if err := s.serve(server, listener); err != nil {
 			errCh <- err
@@ -768,10 +797,10 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		// EscapedPath never includes the query string, so play tokens passed
 		// as ?token= cannot leak into logs through this field.
 		fields := []zap.Field{
-			zap.String("method", r.Method),
-			zap.String("path", r.URL.EscapedPath()),
+			zap.String("method", logSafeValue(r.Method)),
+			zap.String("path", logSafeValue(r.URL.EscapedPath())),
 			zap.Int("status", recorder.status),
-			zap.String("client_ip", s.clientIP(r)),
+			zap.String("client_ip", logSafeValue(s.clientIP(r))),
 			zap.Duration("duration", time.Since(start)),
 		}
 		if isMutatingMethod(r.Method) {
@@ -1232,7 +1261,7 @@ func (s *Server) writeJSON(w http.ResponseWriter, status int, data interface{}) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		s.logger.Error("encode response", zap.Error(err))
+		s.logger.Error("encode response", zap.String("error", logSafeValue(err.Error())))
 	}
 }
 
