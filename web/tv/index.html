@@ -6,124 +6,66 @@
   <meta http-equiv="Cache-Control" content="no-cache">
   <title>StreamDBC Samsung TV</title>
   <style type="text/css">
-    html, body { width: 100%; height: 100%; margin: 0; background: #000; color: #fff; font-family: Arial, sans-serif; }
-    body { overflow: hidden; }
-    #player { display: block; width: 100%; height: 100%; background: #000; }
-    #panel { position: absolute; left: 2%; top: 2%; max-width: 90%; padding: 12px 16px; background: #111; background: rgba(0,0,0,0.78); }
-    #status { margin: 0 0 8px 0; font-size: 28px; font-weight: bold; }
-    #details { margin: 0 0 10px 0; font-size: 16px; }
-    button, a { display: inline-block; margin: 4px 8px 4px 0; padding: 10px 18px; border: 0; background: #1675d1; color: #fff; font-size: 20px; text-decoration: none; cursor: pointer; }
-    #hint { font-size: 14px; color: #ccc; }
+    html, body { width: 100%; height: 100%; margin: 0; padding: 0; background: #000; overflow: hidden; }
+    #player { position: absolute; left: 0; top: 0; width: 100%; height: 100%; margin: 0; padding: 0; background: #000; }
+    #message { display: none; position: absolute; left: 3%; right: 3%; bottom: 4%; padding: 12px 16px; background: #111; color: #fff; font: 20px Arial, sans-serif; }
   </style>
 </head>
 <body>
-  <video id="player" controls autoplay preload="auto">
-    <source src="/tv/live/index.m3u8" type="application/vnd.apple.mpegurl">
-    Video playback is unavailable. Open the direct HLS link on this television.
+  <video id="player" autoplay preload="auto" src="/tv/live/index.m3u8">
+    Video playback is unavailable. Open /tv/live/index.m3u8 directly.
   </video>
-  <div id="panel">
-    <p id="status">Connecting to live video...</p>
-    <p id="details">Profile: checking | Gateway: checking</p>
-    <button id="play" type="button">PLAY</button>
-    <button id="reload" type="button">RELOAD STREAM</button>
-    <button id="fullscreen" type="button">FULLSCREEN</button>
-    <a href="/tv/live/index.m3u8">DIRECT HLS</a>
-    <p id="hint">If this page stays offline, open /tv/basic or the direct HLS link.</p>
-  </div>
+  <div id="message">Connecting to live video...</div>
   <script type="text/javascript">
     (function () {
       var player = document.getElementById('player');
-      var status = document.getElementById('status');
-      var details = document.getElementById('details');
+      var message = document.getElementById('message');
       var retryTimer = null;
-      var retryCount = 0;
 
-      function setStatus(message) {
-        status.innerHTML = message;
+      function showMessage(text) {
+        message.innerHTML = text;
+        message.style.display = 'block';
       }
 
-      function tryPlayback() {
-        setStatus('Starting live video...');
+      function hideMessage() {
+        message.style.display = 'none';
+      }
+
+      function play() {
         try {
           player.load();
-          player.play();
+          var result = player.play();
+          if (result && typeof result.catch === 'function') {
+            result.catch(function () { showMessage('Press ENTER to start video'); });
+          }
         } catch (error) {
-          setStatus('Press PLAY to start video.');
+          showMessage('Press ENTER to start video');
         }
       }
 
-      function scheduleRetry() {
+      function retry() {
         if (retryTimer !== null) {
           window.clearTimeout(retryTimer);
         }
-        if (retryCount < 8) {
-          retryCount = retryCount + 1;
-          setStatus('Stream offline. Retrying...');
-          retryTimer = window.setTimeout(tryPlayback, 5000);
-        } else {
-          setStatus('Stream offline. Press PLAY or RELOAD STREAM.');
-        }
+        showMessage('Stream offline. Retrying...');
+        retryTimer = window.setTimeout(play, 3000);
       }
 
-      function loadStatus() {
-        var request = new XMLHttpRequest();
-        request.onreadystatechange = function () {
-          if (request.readyState === 4) {
-            if (request.status === 200) {
-              try {
-                var result = JSON.parse(request.responseText);
-                details.innerHTML = 'Profile: ' + result.profile + ' | Gateway: ' + result.state;
-                if (result.state === 'live' && result.playlist_ready) {
-                  setStatus('Live video ready');
-                } else if (result.state === 'restarting' || result.state === 'starting') {
-                  setStatus('Connecting to live video...');
-                } else {
-                  setStatus('Stream offline. Press PLAY to retry.');
-                }
-              } catch (error) {
-                details.innerHTML = 'Profile: unknown | Gateway: status unavailable';
-              }
-            } else {
-              details.innerHTML = 'Profile: unknown | Gateway: status unavailable';
-            }
-          }
-        };
-        request.open('GET', '/tv/status', true);
-        request.send(null);
-      }
+      player.addEventListener('playing', hideMessage, false);
+      player.addEventListener('error', retry, false);
+      player.addEventListener('stalled', retry, false);
 
-      document.getElementById('play').onclick = function () {
-        retryCount = 0;
-        tryPlayback();
-      };
-      document.getElementById('reload').onclick = function () {
-        retryCount = 0;
-        tryPlayback();
-        loadStatus();
-      };
-      document.getElementById('fullscreen').onclick = function () {
-        try {
-          if (player.requestFullscreen) {
-            player.requestFullscreen();
-          } else if (player.webkitRequestFullscreen) {
-            player.webkitRequestFullscreen();
-          } else if (player.webkitEnterFullscreen) {
-            player.webkitEnterFullscreen();
-          } else {
-            setStatus('Use the TV browser fullscreen controls.');
-          }
-        } catch (error) {
-          setStatus('Use the TV browser fullscreen controls.');
+      document.onkeydown = function (event) {
+        event = event || window.event;
+        var code = event.keyCode || event.which;
+        if (code === 13 || code === 415 || code === 19 || code === 403) {
+          play();
+          return false;
         }
+        return true;
       };
-      player.addEventListener('playing', function () {
-        retryCount = 0;
-        setStatus('LIVE');
-      }, false);
-      player.addEventListener('error', scheduleRetry, false);
-      player.addEventListener('stalled', scheduleRetry, false);
-      loadStatus();
-      window.setInterval(loadStatus, 10000);
+
+      play();
     }());
   </script>
 </body>

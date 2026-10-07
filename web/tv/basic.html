@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <title>StreamDBC Samsung TV Basic Player</title>
   <style type="text/css">
-    html, body { width: 100%; height: 100%; margin: 0; background: #000; }
-    video { display: block; width: 100%; height: 100%; background: #000; }
+    html, body { width: 100%; height: 100%; margin: 0; padding: 0; background: #000; overflow: hidden; }
+    video { position: absolute; left: 0; top: 0; width: 100%; height: 100%; margin: 0; padding: 0; background: #000; }
   </style>
 </head>
 <body>
-  <video controls autoplay preload="auto" src="/tv/live/index.m3u8">
+  <video autoplay preload="auto" src="/tv/live/index.m3u8">
     Video playback is unavailable. Open /tv/live/index.m3u8 directly.
   </video>
 </body>
