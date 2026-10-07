@@ -104,14 +104,14 @@ go build -o stremdbc.exe ./cmd/stremdbc
 ```
 
 The doctor checks FFmpeg, vMix DirectShow devices, LAN/Wi-Fi, firewall scope,
-port 8080, credentials, and output-directory access. To add the narrowly scoped
-Private-profile TCP 8080 rule, run
+port 8081, credentials, and output-directory access. To add the narrowly scoped
+Private-profile TCP 8081 rule, run
 `scripts\windows\samsung-tv-firewall.ps1` from elevated PowerShell. Remove it
 with `scripts\windows\samsung-tv-firewall.ps1 -Remove`.
 
-Open the printed `http://<PC-LAN-IP>:8080/tv` URL in the television browser.
+Open the printed `http://<PC-LAN-IP>:8081/tv` URL in the television browser.
 The direct HLS fallback is
-`http://<PC-LAN-IP>:8080/tv/live/index.m3u8`; `/tv/basic` is available when the
+`http://<PC-LAN-IP>:8081/tv/live/index.m3u8`; `/tv/basic` is available when the
 browser struggles with the status page. Use
 `scripts\windows\samsung-tv-test.ps1` for HTTP, MIME type, and playlist-refresh
 checks, and `scripts\windows\samsung-tv-stop.ps1` to stop the gateway. Keep the
