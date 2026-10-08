@@ -66,14 +66,20 @@ jobs:
       - name: JavaScript syntax checks
         run: |
           node --check main.js
+          node --check window-lifecycle.js
           node --check preload.js
           node --check samsung-fleet.js
+          node --check samsung-fleet-inventory.js
+          node --check hls-smoke.js
           node --check renderer.js
           node --check player.js
           node --check build.js
           node --check scripts/generate-windows-icon.js
           node --check scripts/prepare-server-runtime.js
           node --check scripts/vendor-hls.js
+
+      - name: Run desktop lifecycle tests
+        run: npm test
 
       - name: Reject remote runtime scripts
         run: |
@@ -116,8 +122,11 @@ jobs:
         shell: pwsh
         run: |
           node --check main.js
+          node --check window-lifecycle.js
           node --check preload.js
           node --check samsung-fleet.js
+          node --check samsung-fleet-inventory.js
+          node --check hls-smoke.js
           node --check renderer.js
           node --check player.js
           node --check build.js
@@ -134,6 +143,7 @@ jobs:
           if (-not (Test-Path server-runtime/stremdbc.exe)) { throw "Bundled stremdbc.exe missing" }
           if (-not (Test-Path server-runtime/configs/samsung-f5500.yaml)) { throw "Samsung config missing" }
           if (-not (Test-Path server-runtime/web/tv/index.html)) { throw "TV web assets missing" }
+          if (-not (Test-Path server-runtime/web/tv/test.mp4)) { throw "TV compatibility clip missing" }
           if (-not (Test-Path server-runtime/ffmpeg/ffmpeg.exe)) { throw "Bundled ffmpeg.exe missing" }
           if (-not (Test-Path server-runtime/ffmpeg/ffprobe.exe)) { throw "Bundled ffprobe.exe missing" }
           if (-not (Test-Path server-runtime/scripts/windows/samsung-tv-doctor.ps1)) { throw "Bundled doctor script missing" }

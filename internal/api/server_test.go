@@ -264,6 +264,7 @@ func TestSamsungTVPagesAndReadOnlyStatus(t *testing.T) {
 	for name, contents := range map[string]string{
 		"index.html": "tv page",
 		"basic.html": "basic page",
+		"test.mp4":   "generated compatibility clip",
 	} {
 		if err := os.WriteFile(filepath.Join(webDir, name), []byte(contents), 0o600); err != nil {
 			t.Fatalf("write TV page: %v", err)
@@ -284,6 +285,11 @@ func TestSamsungTVPagesAndReadOnlyStatus(t *testing.T) {
 		if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), want) {
 			t.Errorf("GET %s returned %d with body %q", path, res.Code, res.Body.String())
 		}
+	}
+	clip := httptest.NewRecorder()
+	server.Handler().ServeHTTP(clip, httptest.NewRequest(http.MethodGet, "/tv/test.mp4", nil))
+	if clip.Code != http.StatusOK || clip.Header().Get("Content-Type") != "video/mp4" || clip.Body.String() != "generated compatibility clip" {
+		t.Fatalf("test MP4 endpoint returned status=%d content-type=%q body=%q", clip.Code, clip.Header().Get("Content-Type"), clip.Body.String())
 	}
 	res := httptest.NewRecorder()
 	server.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v1/tv/status", nil))
@@ -507,7 +513,7 @@ func TestSamsungTVStartRequiresBoundedEmptyJSONBody(t *testing.T) {
 	}
 }
 
-func TestDashboardRequiresAPIKeyWhenAuthEnabled(t *testing.T) {
+func TestDashboardShellIsPublicButManagementAPIRequiresKey(t *testing.T) {
 	dashboard := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dashboard, "index.html"), []byte("<html></html>"), 0o640); err != nil {
 		t.Fatal(err)
@@ -515,30 +521,34 @@ func TestDashboardRequiresAPIKeyWhenAuthEnabled(t *testing.T) {
 	server := newTestServer(t)
 	server.SetStaticRoutes("", "", "", dashboard)
 
-	getDashboard := func(key string) int {
-		req := httptest.NewRequest(http.MethodGet, "/dashboard/index.html", nil)
-		if key != "" {
-			req.Header.Set("X-API-Key", key)
-		}
-		res := httptest.NewRecorder()
-		server.Handler().ServeHTTP(res, req)
-		return res.Code
-	}
-	if got := getDashboard(""); got != http.StatusOK {
-		t.Fatalf("dashboard without auth manager returned %d", got)
-	}
-
 	manager, err := auth.NewManager("0123456789abcdef0123456789abcdef0123456789abcdef", "15m", []string{"secret-key-123456"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	server.SetAuthManager(manager)
 
-	if got := getDashboard(""); got != http.StatusUnauthorized {
-		t.Fatalf("dashboard without API key returned %d", got)
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/index.html", nil)
+	res := httptest.NewRecorder()
+	server.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("dashboard shell without API key returned %d, want 200", res.Code)
 	}
-	if got := getDashboard("secret-key-123456"); got != http.StatusOK {
-		t.Fatalf("dashboard with API key returned %d", got)
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/streams", strings.NewReader(`{"id":"dashboard-auth-check","name":"Dashboard Auth Check"}`))
+	req.Header.Set("Content-Type", "application/json")
+	res = httptest.NewRecorder()
+	server.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("management mutation without API key returned %d, want 401", res.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/streams", strings.NewReader(`{"id":"dashboard-auth-check","name":"Dashboard Auth Check"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "secret-key-123456")
+	res = httptest.NewRecorder()
+	server.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("management mutation with API key returned %d, want 201", res.Code)
 	}
 }
 

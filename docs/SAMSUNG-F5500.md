@@ -159,6 +159,11 @@ The direct native HLS fallback is:
 http://ztv.zeaz.dev:8081/tv/live/index.m3u8
 ```
 
+For codec troubleshooting, use the static compatibility clip at
+`http://<PC-LAN-IP>:8081/tv/test.mp4`. It is a short 720p H.264 Baseline and
+AAC-LC test pattern, independent of vMix and the live HLS gateway. The TV must
+be able to reach the PC's current LAN IP on port 8081.
+
 The basic page at `/tv/basic` contains only a video element and is useful when
 the legacy browser cannot run the status-page JavaScript. The page uses plain
 ES5 JavaScript and does not use HLS.js, modules, fetch, promises, CSS Grid, or
@@ -282,4 +287,3 @@ evidence for:
 - source loss/recovery;
 - Wi-Fi interruption recovery;
 - latency, CPU/RAM and soak duration.
-

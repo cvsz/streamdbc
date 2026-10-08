@@ -12,7 +12,7 @@
   </style>
 </head>
 <body>
-  <video id="player" autoplay preload="auto" src="/tv/live/index.m3u8">
+  <video id="player" autoplay muted playsinline preload="auto" src="/tv/live/index.m3u8">
     Video playback is unavailable. Open /tv/live/index.m3u8 directly.
   </video>
   <div id="message">Connecting to live video...</div>
@@ -31,15 +31,31 @@
         message.style.display = 'none';
       }
 
+      function unmuteAfterStart() {
+        window.setTimeout(function () {
+          try {
+            player.muted = false;
+            player.volume = 1;
+          } catch (error) {}
+        }, 750);
+      }
+
       function play() {
         try {
+          player.muted = true;
           player.load();
           var result = player.play();
-          if (result && typeof result.catch === 'function') {
-            result.catch(function () { showMessage('Press ENTER to start video'); });
+          if (result && typeof result.then === 'function') {
+            result.then(unmuteAfterStart).catch(function () {
+              showMessage('Autoplay blocked. Retrying...');
+              window.setTimeout(play, 1500);
+            });
+          } else {
+            unmuteAfterStart();
           }
         } catch (error) {
-          showMessage('Press ENTER to start video');
+          showMessage('Autoplay retrying...');
+          window.setTimeout(play, 1500);
         }
       }
 
@@ -51,7 +67,10 @@
         retryTimer = window.setTimeout(play, 3000);
       }
 
-      player.addEventListener('playing', hideMessage, false);
+      player.addEventListener('playing', function () {
+        hideMessage();
+        unmuteAfterStart();
+      }, false);
       player.addEventListener('error', retry, false);
       player.addEventListener('stalled', retry, false);
 

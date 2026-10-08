@@ -250,35 +250,15 @@ func (s *Server) SetStaticRoutes(hlsPath, llhlsPath, playerFile, dashboardDir st
 		}))
 	}
 	if dashboardDir != "" {
-		s.registerRoute("/dashboard", s.requireManagementKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.registerRoute("/dashboard", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				s.methodNotAllowed(w)
 				return
 			}
 			http.Redirect(w, r, "/dashboard/", http.StatusTemporaryRedirect)
-		})))
-		s.registerRoute("/dashboard/", s.requireManagementKey(s.staticHandler("/dashboard/", dashboardDir, false)))
+		}))
+		s.registerRoute("/dashboard/", s.staticHandler("/dashboard/", dashboardDir, false))
 	}
-}
-
-// requireManagementKey gates the zero-build management UI behind a
-// management API key whenever authentication is configured. Without an auth
-// manager (local development) the UI stays open, matching authorizeMutation.
-// Playback and TV pages keep their own rules: authorizePlayback for media,
-// key-gated mutations for /tv actions.
-func (s *Server) requireManagementKey(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		manager := s.authManagerSnapshot()
-		if manager == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if hasValidManagementKey(manager, r.Header.Get("X-API-Key")) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		s.unauthorized(w)
-	})
 }
 
 // SetSamsungTV registers the F5500-specific pages, HLS output, and status and
@@ -299,6 +279,7 @@ func (s *Server) SetSamsungTV(manager *samsung.Manager, cfg config.SamsungTVConf
 		s.registerRoute("/tv", page("index.html"))
 		s.registerRoute("/tv/", page("index.html"))
 		s.registerRoute("/tv/basic", page("basic.html"))
+		s.registerRoute("/tv/test.mp4", page("test.mp4"))
 	}
 	if cfg.Enable && cfg.OutputPath != "" && manager != nil {
 		s.registerRoute("/tv/live/", samsungHLShandler(cfg.OutputPath, func() bool {

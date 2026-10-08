@@ -263,8 +263,11 @@
                 <span class="muted">SSDP discovery + DLNA/UPnP AVTransport + RenderingControl</span>
               </div>
               <div class="actions">
-                <button class="btn btn-primary" id="fleetDiscoverBtn">Discover TVs</button>
+                <button class="btn btn-primary" id="samsungModeBtn">Start Samsung Mode</button>
+                <button class="btn" id="samsungStopWallBtn">Stop TV Wall</button>
+                <button class="btn" id="fleetDiscoverBtn">Discover TVs</button>
                 <button class="btn" id="fleetRefreshBtn">Refresh State</button>
+                <button class="btn" id="samsungHlsTestBtn">Test HLS</button>
               </div>
             </div>
 
@@ -283,7 +286,9 @@
             </div>
 
             <div class="summary-grid samsung-summary">
-              <div class="summary-card"><div class="label">Discovered</div><div class="value small-value" id="fleetCount">0</div></div>
+              <div class="summary-card"><div class="label">Fleet</div><div class="value small-value" id="fleetCount">0</div></div>
+              <div class="summary-card"><div class="label">Known</div><div class="value small-value" id="fleetKnownCount">0</div></div>
+              <div class="summary-card"><div class="label">Online</div><div class="value small-value" id="fleetOnlineCount">0</div></div>
               <div class="summary-card"><div class="label">Playing</div><div class="value small-value" id="fleetPlaying">0</div></div>
               <div class="summary-card"><div class="label">AVTransport</div><div class="value small-value" id="fleetAvCount">0</div></div>
               <div class="summary-card"><div class="label">Renderer Control</div><div class="value small-value" id="fleetRcCount">0</div></div>
@@ -296,14 +301,17 @@
                     <th>TV</th>
                     <th>IP</th>
                     <th>Model</th>
+                    <th>Online</th>
+                    <th>AVTransport</th>
                     <th>Transport</th>
+                    <th>Last Error</th>
                     <th>Volume</th>
                     <th>Mute</th>
                     <th>Control</th>
                   </tr>
                 </thead>
                 <tbody id="samsungFleetBody">
-                  <tr><td colspan="7" class="empty">Click Discover TVs.</td></tr>
+                  <tr><td colspan="10" class="empty">Click Discover TVs.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -356,12 +364,6 @@
               <label class="checkbox-label">
                 <input type="checkbox" id="notifications">
                 Enable Notifications
-              </label>
-            </div>
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" id="minimizeToTray">
-                Minimize to Tray
               </label>
             </div>
             <div class="form-actions">

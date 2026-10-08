@@ -41,6 +41,7 @@ copyTree(path.join(clientDir, 'vendor', 'ffmpeg'), path.join(runtimeDir, 'ffmpeg
 for (const required of [
   path.join(runtimeDir, 'ffmpeg', 'ffmpeg.exe'),
   path.join(runtimeDir, 'ffmpeg', 'ffprobe.exe'),
+  path.join(runtimeDir, 'web', 'tv', 'test.mp4'),
   path.join(runtimeDir, 'scripts', 'windows', 'samsung-tv-doctor.ps1')
 ]) {
   if (!fs.existsSync(required)) throw new Error(`Required bundled runtime file missing: ${required}`);

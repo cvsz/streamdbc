@@ -6,7 +6,10 @@ const http = require('http');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const os = require('os');
-const { discoverFleet, getTVState, runTVAction } = require('./samsung-fleet');
+const { discoverFleetDetailed, getTVState, hydrateKnownDescription, runTVAction } = require('./samsung-fleet');
+const { applyProbeResults, mergeKnownAndDiscovered, probeKnownFleet, validateLanMediaUrl } = require('./samsung-fleet-inventory');
+const { runHlsSmokeTest } = require('./hls-smoke');
+const { createBeforeQuitHandler, handleWindowClose, handleWindowAllClosed, terminateManagedProcessTree } = require('./window-lifecycle');
 
 const electronSessionRoot = path.join(os.tmpdir(), 'StreamDBC', 'electron-session');
 try {
@@ -24,7 +27,6 @@ let settings = {
   serverUrl: 'http://127.0.0.1:8081',
   autoStart: false,
   notifications: true,
-  minimizeToTray: true,
   serverUrlSaved: false,
   workspacePath: '',
   cloudflareHostname: 'ztv.zeaz.dev',
@@ -155,6 +157,7 @@ function loadSettings() {
         saveAPIKey(apiKey);
         fs.writeFileSync(getSettingsPath(), JSON.stringify(data, null, 2), { mode: 0o600 });
       }
+      delete data.minimizeToTray;
       settings = { ...settings, ...data };
     }
     if (!apiKey) apiKey = loadAPIKey();
@@ -181,7 +184,7 @@ function isPrivateIPv4(address) {
     (parts[0] === 192 && parts[1] === 168);
 }
 
-function getLanIPv4() {
+function getLanIPv4Candidates() {
   const candidates = [];
   for (const [name, entries] of Object.entries(os.networkInterfaces())) {
     for (const entry of entries || []) {
@@ -193,7 +196,11 @@ function getLanIPv4() {
     }
   }
   candidates.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
-  return candidates[0] || null;
+  return candidates;
+}
+
+function getLanIPv4() {
+  return getLanIPv4Candidates()[0] || null;
 }
 
 function normalizeCloudflareHostname(value) {
@@ -340,21 +347,16 @@ function createMainWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
 
-  mainWindow.on('close', (event) => {
-    if (settings.minimizeToTray && !app.isQuitting) {
-      event.preventDefault();
-      mainWindow.hide();
-    }
-  });
+  mainWindow.on('close', (event) => handleWindowClose(event, app));
 
   mainWindow.on('show', () => {
-    if (tray) {
+    if (process.platform === 'darwin' && tray && typeof tray.setHighlightMode === 'function') {
       tray.setHighlightMode('always');
     }
   });
 
   mainWindow.on('hide', () => {
-    if (tray) {
+    if (process.platform === 'darwin' && tray && typeof tray.setHighlightMode === 'function') {
       tray.setHighlightMode('never');
     }
   });
@@ -605,17 +607,21 @@ async function startServerRuntime() {
 async function stopServerRuntime() {
   const health = await requestJson('GET', settings.serverUrl, '/health');
   if (!health?.ok) {
-    if (serverProcess && !serverProcess.killed) {
-      try { serverProcess.kill(); } catch {}
+    if (serverProcess) {
+      try {
+        await terminateManagedProcessTree(serverProcess, process.platform);
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
       serverProcess = null;
     }
     updateTrayMenu();
     return { ok: true, alreadyStopped: true, status: await getServerRuntimeStatus() };
   }
 
-  if (serverProcess && !serverProcess.killed) {
+  if (serverProcess) {
     try {
-      serverProcess.kill();
+      await terminateManagedProcessTree(serverProcess, process.platform);
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -1002,15 +1008,20 @@ async function deleteStream(serverUrl, streamId) {
   }
 }
 
-function requestJson(method, serverUrl, route) {
+function requestJson(method, serverUrl, route, body = undefined) {
   serverUrl = normalizeServerUrl(serverUrl);
   return new Promise((resolve) => {
     const url = new URL(route, serverUrl);
     const client = url.protocol === 'https:' ? https : http;
+    const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
     const req = client.request(url, {
       method,
       headers: {
         'Accept': 'application/json',
+        ...(payload ? {
+          'Content-Type': 'application/json',
+          'Content-Length': String(payload.length)
+        } : {}),
         ...(apiKey ? { 'X-API-Key': apiKey } : {})
       },
       timeout: 10000
@@ -1029,6 +1040,7 @@ function requestJson(method, serverUrl, route) {
     });
     req.on('error', (err) => resolve({ ok: false, error: err.message }));
     req.on('timeout', () => req.destroy(new Error('request timed out')));
+    if (payload) req.write(payload);
     req.end();
   });
 }
@@ -1041,7 +1053,7 @@ async function samsungAction(serverUrl, action) {
   if (!['start', 'stop', 'restart'].includes(action)) {
     return { ok: false, error: 'Unsupported Samsung action' };
   }
-  return requestJson('POST', serverUrl, `/api/v1/tv/${action}`);
+  return requestJson('POST', serverUrl, `/api/v1/tv/${action}`, {});
 }
 
 function samsungPublicUrl(kind) {
@@ -1197,18 +1209,14 @@ app.whenReady().then(() => {
   mainWindow.webContents.send('settings-updated', publicSettings());
 });
 
-app.on('before-quit', () => {
-  saveSettings();
-});
+app.on('before-quit', createBeforeQuitHandler({
+  app,
+  getManagedProcess: () => serverProcess,
+  saveSettings,
+  platform: process.platform
+}));
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    if (tray) {
-      tray.destroy();
-    }
-    app.quit();
-  }
-});
+app.on('window-all-closed', () => handleWindowAllClosed(app, tray, process.platform));
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
@@ -1300,13 +1308,57 @@ ipcMain.handle('update-cloudflare-dns', async () => {
 });
 
 ipcMain.handle('samsung-fleet-discover', async () => {
-  const lan = getLanIPv4();
-  if (!lan?.address) return { ok: false, error: 'No physical private LAN IPv4 address was detected.', tvs: [] };
+  const candidates = getLanIPv4Candidates();
+  const discoveredByIP = new Map();
+  const diagnostics = [];
+  for (const lan of candidates) {
+    try {
+      const result = await discoverFleetDetailed(lan.address);
+      diagnostics.push({
+        interface: lan.name,
+        localIP: lan.address,
+        mSearchSent: result.diagnostics.mSearchSent,
+        responses: result.diagnostics.responses,
+        uniqueLocations: result.diagnostics.uniqueLocations,
+        hydrated: result.diagnostics.hydrated,
+        descriptionFailures: result.diagnostics.descriptionFailures
+      });
+      for (const tv of result.tvs) {
+        if (!discoveredByIP.has(tv.ip)) discoveredByIP.set(tv.ip, tv);
+      }
+    } catch (err) {
+      diagnostics.push({ interface: lan.name, localIP: lan.address, mSearchSent: false, responses: 0, hydrated: 0, error: err.message });
+    }
+  }
+
+  const inventoryBeforeProbes = mergeKnownAndDiscovered([...discoveredByIP.values()], samsungFleet);
+  const probeResults = await probeKnownFleet();
+  const onlineKnownIPs = new Set(probeResults.filter((result) => result.online).map((result) => result.ip));
+  const refreshedSessionDescriptors = [];
+  for (const tv of inventoryBeforeProbes) {
+    if (!tv.known || tv.discoverySource !== 'session-cache' || !onlineKnownIPs.has(tv.ip)) continue;
+    const refreshed = await hydrateKnownDescription(tv);
+    if (refreshed) refreshedSessionDescriptors.push({ ...refreshed, discoverySource: 'session-cache' });
+  }
+  const inventory = mergeKnownAndDiscovered([...discoveredByIP.values(), ...refreshedSessionDescriptors], samsungFleet);
+  samsungFleet = applyProbeResults(inventory, probeResults);
+  const preferred = candidates[0] || null;
+  return {
+    ok: true,
+    localIP: preferred?.address || '',
+    interface: preferred?.name || '',
+    tvs: samsungFleet,
+    diagnostics,
+    probes: probeResults,
+    warning: preferred ? '' : 'No physical private LAN IPv4 address was detected.'
+  };
+});
+
+ipcMain.handle('samsung-hls-test', async () => {
   try {
-    samsungFleet = await discoverFleet(lan.address);
-    return { ok: true, localIP: lan.address, interface: lan.name, tvs: samsungFleet };
+    return await runHlsSmokeTest({ baseUrl: settings.serverUrl });
   } catch (err) {
-    return { ok: false, error: err.message, tvs: [] };
+    return { ok: false, error: err.message };
   }
 });
 
@@ -1316,14 +1368,22 @@ ipcMain.handle('samsung-fleet-list', async () => ({
 }));
 
 ipcMain.handle('samsung-fleet-status', async () => {
-  const states = [];
-  for (const tv of samsungFleet) {
-    try {
-      states.push(await getTVState(tv));
-    } catch (err) {
-      states.push({ ip: tv.ip, transport: '', volume: null, muted: null, errors: [err.message] });
+  const states = await Promise.all(samsungFleet.map(async (tv) => {
+    if (!tv.online) {
+      return { ip: tv.ip, transport: 'OFFLINE', volume: null, muted: null, errors: ['No allowlisted TCP port responded.'] };
     }
-  }
+    if (!tv.capabilitiesKnown) {
+      return { ip: tv.ip, transport: 'UNKNOWN', volume: null, muted: null, errors: ['Online by TCP probe; UPnP capabilities are not verified.'] };
+    }
+    if (!tv.capabilities?.avTransport) {
+      return { ip: tv.ip, transport: 'NO_AVTRANSPORT', volume: null, muted: null, errors: ['UPnP description did not advertise AVTransport.'] };
+    }
+    try {
+      return await getTVState(tv);
+    } catch (err) {
+      return { ip: tv.ip, transport: '', volume: null, muted: null, errors: [err.message] };
+    }
+  }));
   return { ok: true, states };
 });
 
@@ -1332,7 +1392,17 @@ ipcMain.handle('samsung-fleet-action', async (event, data) => {
   const tv = samsungFleet.find((item) => item.ip === ip);
   if (!tv) return { ok: false, error: 'TV is not in the current discovered Samsung fleet.' };
   try {
-    const result = await runTVAction(tv, data?.action, data?.value);
+    let value = data?.value;
+    if (data?.action === 'play-url') {
+      value = validateLanMediaUrl(value, getLanIPv4Candidates().map((lan) => lan.address));
+      if (!tv.capabilities?.setAVTransportURI || !tv.capabilities?.play) {
+        return { ok: false, error: 'AVTransport SetAVTransportURI and Play capabilities are not verified for this TV.' };
+      }
+    }
+    if (data?.action === 'stop' && !tv.capabilities?.stop) {
+      return { ok: false, error: 'AVTransport Stop capability is not verified for this TV.' };
+    }
+    const result = await runTVAction(tv, data?.action, value);
     return { ...result, state: await getTVState(tv) };
   } catch (err) {
     return { ok: false, error: err.message };
@@ -1340,16 +1410,35 @@ ipcMain.handle('samsung-fleet-action', async (event, data) => {
 });
 
 ipcMain.handle('samsung-fleet-action-all', async (event, data) => {
-  const results = [];
-  for (const tv of samsungFleet) {
-    try {
-      const result = await runTVAction(tv, data?.action, data?.value);
-      results.push({ ip: tv.ip, ...result });
-    } catch (err) {
-      results.push({ ip: tv.ip, ok: false, error: err.message });
+  const results = await Promise.all(samsungFleet.map(async (tv) => {
+    if (!tv.online) return { ip: tv.ip, ok: false, error: 'TV is offline or no allowlisted port responded.' };
+    if (data?.action === 'play-url' && (!tv.capabilities?.setAVTransportURI || !tv.capabilities?.play)) {
+      return { ip: tv.ip, ok: false, error: 'AVTransport SetAVTransportURI and Play capabilities are not verified.' };
     }
-  }
+    try {
+      let value = data?.value;
+      if (data?.action === 'play-url') value = validateLanMediaUrl(value, getLanIPv4Candidates().map((lan) => lan.address));
+      const result = await runTVAction(tv, data?.action, value);
+      return { ip: tv.ip, ...result };
+    } catch (err) {
+      return { ip: tv.ip, ok: false, error: err.message };
+    }
+  }));
   return { ok: results.length > 0 && results.every((item) => item.ok), results };
+});
+
+ipcMain.handle('stop-tv-wall', async () => {
+  const tvResults = await Promise.all(samsungFleet.map(async (tv) => {
+    if (!tv.online) return { ip: tv.ip, ok: false, skipped: true, error: 'TV is offline or no allowlisted port responded.' };
+    if (!tv.capabilities?.stop) return { ip: tv.ip, ok: false, skipped: true, error: 'AVTransport Stop capability is not verified.' };
+    try {
+      return { ip: tv.ip, ...await runTVAction(tv, 'stop') };
+    } catch (err) {
+      return { ip: tv.ip, ok: false, error: err.message };
+    }
+  }));
+  const gateway = await samsungAction(settings.serverUrl, 'stop');
+  return { ok: gateway.ok && tvResults.every((result) => result.ok || result.skipped), gateway, tvResults };
 });
 
 ipcMain.handle('samsung-action', async (event, { serverUrl, action }) => {
