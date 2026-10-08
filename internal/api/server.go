@@ -250,14 +250,14 @@ func (s *Server) SetStaticRoutes(hlsPath, llhlsPath, playerFile, dashboardDir st
 		}))
 	}
 	if dashboardDir != "" {
-		s.registerRoute("/dashboard", s.requireManagementKey(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.registerRoute("/dashboard", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				s.methodNotAllowed(w)
 				return
 			}
 			http.Redirect(w, r, "/dashboard/", http.StatusTemporaryRedirect)
-		})))
-		s.registerRoute("/dashboard/", s.requireManagementKey(s.staticHandler("/dashboard/", dashboardDir, false)))
+		}))
+		s.registerRoute("/dashboard/", s.staticHandler("/dashboard/", dashboardDir, false))
 	}
 }
 
