@@ -261,26 +261,6 @@ func (s *Server) SetStaticRoutes(hlsPath, llhlsPath, playerFile, dashboardDir st
 	}
 }
 
-// requireManagementKey gates the zero-build management UI behind a
-// management API key whenever authentication is configured. Without an auth
-// manager (local development) the UI stays open, matching authorizeMutation.
-// Playback and TV pages keep their own rules: authorizePlayback for media,
-// key-gated mutations for /tv actions.
-func (s *Server) requireManagementKey(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		manager := s.authManagerSnapshot()
-		if manager == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if hasValidManagementKey(manager, r.Header.Get("X-API-Key")) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		s.unauthorized(w)
-	})
-}
-
 // SetSamsungTV registers the F5500-specific pages, HLS output, and status and
 // management endpoints. The HLS route serves only known generated filenames.
 func (s *Server) SetSamsungTV(manager *samsung.Manager, cfg config.SamsungTVConfig, tvDirectory string) {
