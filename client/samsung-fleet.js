@@ -195,21 +195,29 @@ function discoverSsdp(localIP, timeoutMs = 4500) {
       });
     });
     socket.bind({ address: localIP, port: 0, exclusive: true }, () => {
+      try {
+        socket.setMulticastInterface(localIP);
+        socket.setMulticastTTL(2);
+      } catch {}
       const searches = [
         'ssdp:all',
         'urn:schemas-upnp-org:device:MediaRenderer:1',
         'urn:samsung.com:device:MainTVServer2:1'
       ];
-      for (const st of searches) {
-        const payload = Buffer.from(
-          'M-SEARCH * HTTP/1.1\r\n' +
-          'HOST: 239.255.255.250:1900\r\n' +
-          'MAN: "ssdp:discover"\r\n' +
-          'MX: 2\r\n' +
-          'ST: ' + st + '\r\n\r\n'
-        );
-        socket.send(payload, SSDP_PORT, SSDP_HOST);
-      }
+      const sendSearches = () => {
+        for (const st of searches) {
+          const payload = Buffer.from(
+            'M-SEARCH * HTTP/1.1\r\n' +
+            'HOST: 239.255.255.250:1900\r\n' +
+            'MAN: "ssdp:discover"\r\n' +
+            'MX: 2\r\n' +
+            'ST: ' + st + '\r\n\r\n'
+          );
+          socket.send(payload, SSDP_PORT, SSDP_HOST);
+        }
+      };
+      sendSearches();
+      setTimeout(sendSearches, 1200);
       setTimeout(done, timeoutMs);
     });
   });
