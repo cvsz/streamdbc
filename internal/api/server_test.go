@@ -528,19 +528,21 @@ func TestDashboardShellIsPublicButManagementAPIRequiresKey(t *testing.T) {
 		t.Fatalf("dashboard shell without API key returned %d, want 200", res.Code)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/streams", strings.NewReader(`{"id":"dashboard-auth-check","name":"Dashboard Auth Check"}`))
+	req.Header.Set("Content-Type", "application/json")
 	res = httptest.NewRecorder()
 	server.Handler().ServeHTTP(res, req)
 	if res.Code != http.StatusUnauthorized {
-		t.Fatalf("management API without API key returned %d, want 401", res.Code)
+		t.Fatalf("management mutation without API key returned %d, want 401", res.Code)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/streams", strings.NewReader(`{"id":"dashboard-auth-check","name":"Dashboard Auth Check"}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-Key", "secret-key-123456")
 	res = httptest.NewRecorder()
 	server.Handler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK {
-		t.Fatalf("management API with API key returned %d, want 200", res.Code)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("management mutation with API key returned %d, want 201", res.Code)
 	}
 }
 
