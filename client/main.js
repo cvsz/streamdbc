@@ -181,7 +181,7 @@ function isPrivateIPv4(address) {
     (parts[0] === 192 && parts[1] === 168);
 }
 
-function getLanIPv4() {
+function getLanIPv4Candidates() {
   const candidates = [];
   for (const [name, entries] of Object.entries(os.networkInterfaces())) {
     for (const entry of entries || []) {
@@ -193,7 +193,11 @@ function getLanIPv4() {
     }
   }
   candidates.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
-  return candidates[0] || null;
+  return candidates;
+}
+
+function getLanIPv4() {
+  return getLanIPv4Candidates()[0] || null;
 }
 
 function normalizeCloudflareHostname(value) {
@@ -1300,14 +1304,37 @@ ipcMain.handle('update-cloudflare-dns', async () => {
 });
 
 ipcMain.handle('samsung-fleet-discover', async () => {
-  const lan = getLanIPv4();
-  if (!lan?.address) return { ok: false, error: 'No physical private LAN IPv4 address was detected.', tvs: [] };
-  try {
-    samsungFleet = await discoverFleet(lan.address);
-    return { ok: true, localIP: lan.address, interface: lan.name, tvs: samsungFleet };
-  } catch (err) {
-    return { ok: false, error: err.message, tvs: [] };
+  const candidates = getLanIPv4Candidates();
+  if (!candidates.length) {
+    return { ok: false, error: 'No physical private LAN IPv4 address was detected.', tvs: [] };
   }
+
+  const merged = new Map();
+  const diagnostics = [];
+  for (const lan of candidates) {
+    try {
+      const discovered = await discoverFleet(lan.address);
+      diagnostics.push({ interface: lan.name, localIP: lan.address, count: discovered.length });
+      for (const tv of discovered) {
+        if (!merged.has(tv.ip)) merged.set(tv.ip, tv);
+      }
+    } catch (err) {
+      diagnostics.push({ interface: lan.name, localIP: lan.address, count: 0, error: err.message });
+    }
+  }
+
+  samsungFleet = [...merged.values()].sort((a, b) =>
+    a.ip.localeCompare(b.ip, undefined, { numeric: true })
+  );
+
+  const preferred = candidates.find((lan) => lan.address.startsWith('192.168.1.')) || candidates[0];
+  return {
+    ok: true,
+    localIP: preferred.address,
+    interface: preferred.name,
+    tvs: samsungFleet,
+    diagnostics
+  };
 });
 
 ipcMain.handle('samsung-fleet-list', async () => ({
