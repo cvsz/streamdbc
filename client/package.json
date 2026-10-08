@@ -6,6 +6,7 @@
   "scripts": {
     "start": "npm run generate:icon && electron .",
     "build": "node build.js",
+    "test": "node --test",
     "build:win": "npm run generate:icon && npm run vendor && npm run prepare-runtime && electron-builder --win nsis portable --publish never",
     "dev": "electron . --enable-logging",
     "pack": "electron-builder --dir",

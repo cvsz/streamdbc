@@ -7,6 +7,7 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const os = require('os');
 const { discoverFleet, getTVState, runTVAction } = require('./samsung-fleet');
+const { handleWindowClose, handleWindowAllClosed } = require('./window-lifecycle');
 
 const electronSessionRoot = path.join(os.tmpdir(), 'StreamDBC', 'electron-session');
 try {
@@ -24,7 +25,6 @@ let settings = {
   serverUrl: 'http://127.0.0.1:8081',
   autoStart: false,
   notifications: true,
-  minimizeToTray: true,
   serverUrlSaved: false,
   workspacePath: '',
   cloudflareHostname: 'ztv.zeaz.dev',
@@ -155,6 +155,7 @@ function loadSettings() {
         saveAPIKey(apiKey);
         fs.writeFileSync(getSettingsPath(), JSON.stringify(data, null, 2), { mode: 0o600 });
       }
+      delete data.minimizeToTray;
       settings = { ...settings, ...data };
     }
     if (!apiKey) apiKey = loadAPIKey();
@@ -344,12 +345,7 @@ function createMainWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
 
-  mainWindow.on('close', (event) => {
-    if (settings.minimizeToTray && !app.isQuitting) {
-      event.preventDefault();
-      mainWindow.hide();
-    }
-  });
+  mainWindow.on('close', (event) => handleWindowClose(event, app));
 
   mainWindow.on('show', () => {
     if (process.platform === 'darwin' && tray && typeof tray.setHighlightMode === 'function') {
@@ -1211,14 +1207,7 @@ app.on('before-quit', () => {
   saveSettings();
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    if (tray) {
-      tray.destroy();
-    }
-    app.quit();
-  }
-});
+app.on('window-all-closed', () => handleWindowAllClosed(app, tray, process.platform));
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {

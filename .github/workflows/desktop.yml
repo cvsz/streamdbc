@@ -66,6 +66,7 @@ jobs:
       - name: JavaScript syntax checks
         run: |
           node --check main.js
+          node --check window-lifecycle.js
           node --check preload.js
           node --check samsung-fleet.js
           node --check renderer.js
@@ -74,6 +75,9 @@ jobs:
           node --check scripts/generate-windows-icon.js
           node --check scripts/prepare-server-runtime.js
           node --check scripts/vendor-hls.js
+
+      - name: Run desktop lifecycle tests
+        run: npm test
 
       - name: Reject remote runtime scripts
         run: |

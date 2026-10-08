@@ -29,7 +29,6 @@ function applySettings() {
   $('apiKey').value = '';
   $('apiKey').placeholder = settings.hasApiKey ? 'Stored securely — enter to replace' : 'Your API key';
   $('notifications').checked = settings.notifications !== false;
-  $('minimizeToTray').checked = settings.minimizeToTray !== false;
   if ($('cloudflareHostname')) $('cloudflareHostname').value = settings.cloudflareHostname || 'ztv.zeaz.dev';
   if ($('cloudflareToken')) {
     $('cloudflareToken').value = '';
@@ -274,8 +273,7 @@ async function saveSettings() {
     cloudflareHostname: $('cloudflareHostname')?.value.trim() || 'ztv.zeaz.dev',
     cloudflareToken: $('cloudflareToken')?.value.trim() || '',
     cloudflareAutoUpdate: $('cloudflareAutoUpdate')?.checked === true,
-    notifications: $('notifications').checked,
-    minimizeToTray: $('minimizeToTray').checked
+    notifications: $('notifications').checked
   };
 
   settings = await API.saveSettings(newSettings);
