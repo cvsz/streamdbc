@@ -1006,15 +1006,20 @@ async function deleteStream(serverUrl, streamId) {
   }
 }
 
-function requestJson(method, serverUrl, route) {
+function requestJson(method, serverUrl, route, body = undefined) {
   serverUrl = normalizeServerUrl(serverUrl);
   return new Promise((resolve) => {
     const url = new URL(route, serverUrl);
     const client = url.protocol === 'https:' ? https : http;
+    const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
     const req = client.request(url, {
       method,
       headers: {
         'Accept': 'application/json',
+        ...(payload ? {
+          'Content-Type': 'application/json',
+          'Content-Length': String(payload.length)
+        } : {}),
         ...(apiKey ? { 'X-API-Key': apiKey } : {})
       },
       timeout: 10000
@@ -1033,6 +1038,7 @@ function requestJson(method, serverUrl, route) {
     });
     req.on('error', (err) => resolve({ ok: false, error: err.message }));
     req.on('timeout', () => req.destroy(new Error('request timed out')));
+    if (payload) req.write(payload);
     req.end();
   });
 }
@@ -1045,7 +1051,7 @@ async function samsungAction(serverUrl, action) {
   if (!['start', 'stop', 'restart'].includes(action)) {
     return { ok: false, error: 'Unsupported Samsung action' };
   }
-  return requestJson('POST', serverUrl, `/api/v1/tv/${action}`);
+  return requestJson('POST', serverUrl, `/api/v1/tv/${action}`, {});
 }
 
 function samsungPublicUrl(kind) {
