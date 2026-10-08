@@ -507,7 +507,7 @@ func TestSamsungTVStartRequiresBoundedEmptyJSONBody(t *testing.T) {
 	}
 }
 
-func TestDashboardRequiresAPIKeyWhenAuthEnabled(t *testing.T) {
+func TestDashboardShellIsPublicButManagementAPIRequiresKey(t *testing.T) {
 	dashboard := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dashboard, "index.html"), []byte("<html></html>"), 0o640); err != nil {
 		t.Fatal(err)
@@ -515,30 +515,32 @@ func TestDashboardRequiresAPIKeyWhenAuthEnabled(t *testing.T) {
 	server := newTestServer(t)
 	server.SetStaticRoutes("", "", "", dashboard)
 
-	getDashboard := func(key string) int {
-		req := httptest.NewRequest(http.MethodGet, "/dashboard/index.html", nil)
-		if key != "" {
-			req.Header.Set("X-API-Key", key)
-		}
-		res := httptest.NewRecorder()
-		server.Handler().ServeHTTP(res, req)
-		return res.Code
-	}
-	if got := getDashboard(""); got != http.StatusOK {
-		t.Fatalf("dashboard without auth manager returned %d", got)
-	}
-
 	manager, err := auth.NewManager("0123456789abcdef0123456789abcdef0123456789abcdef", "15m", []string{"secret-key-123456"}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	server.SetAuthManager(manager)
 
-	if got := getDashboard(""); got != http.StatusUnauthorized {
-		t.Fatalf("dashboard without API key returned %d", got)
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/index.html", nil)
+	res := httptest.NewRecorder()
+	server.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("dashboard shell without API key returned %d, want 200", res.Code)
 	}
-	if got := getDashboard("secret-key-123456"); got != http.StatusOK {
-		t.Fatalf("dashboard with API key returned %d", got)
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+	res = httptest.NewRecorder()
+	server.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("management API without API key returned %d, want 401", res.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/stats", nil)
+	req.Header.Set("X-API-Key", "secret-key-123456")
+	res = httptest.NewRecorder()
+	server.Handler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("management API with API key returned %d, want 200", res.Code)
 	}
 }
 
