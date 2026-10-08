@@ -557,6 +557,101 @@ async function runSamsungFleetAll(action, value) {
   await refreshSamsungFleetState();
 }
 
+async function startSamsungMode() {
+  const button = $('samsungModeBtn');
+  if (button) button.disabled = true;
+  const output = $('builderOutput');
+  const log = (message) => {
+    if (output) output.textContent += (output.textContent.endsWith('\n') ? '' : '\n') + message + '\n';
+  };
+
+  try {
+    if (output) output.textContent = 'Starting Samsung Mode...\n';
+
+    const server = await API.getServerRuntimeStatus();
+    if (!server?.running) {
+      log('1/6 Starting StreamDBC server...');
+      const started = await API.serverRuntimeAction('start');
+      if (!started?.ok) throw new Error(started?.error || 'Unable to start StreamDBC server');
+    } else {
+      log('1/6 StreamDBC server already running.');
+    }
+
+    log('2/6 Checking Samsung gateway...');
+    let gateway = await API.fetchSamsungStatus(settings.serverUrl);
+    if (!gateway?.ok) throw new Error(gateway?.error || 'Unable to read Samsung gateway status');
+    if (String(gateway.body?.state || '').toLowerCase() !== 'live') {
+      const startedGateway = await API.samsungAction({ serverUrl: settings.serverUrl, action: 'start' });
+      if (!startedGateway?.ok && startedGateway?.statusCode !== 409) {
+        throw new Error(startedGateway?.body?.error || startedGateway?.error || 'Unable to start Samsung gateway');
+      }
+    }
+
+    log('3/6 Waiting for live HLS playlist...');
+    let ready = false;
+    for (let i = 0; i < 30; i++) {
+      gateway = await API.fetchSamsungStatus(settings.serverUrl);
+      if (gateway?.ok && String(gateway.body?.state || '').toLowerCase() === 'live' && gateway.body?.playlist_ready === true) {
+        ready = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (!ready) throw new Error('Samsung HLS playlist did not become ready');
+
+    log('4/6 Discovering Samsung TVs...');
+    const discovered = await API.samsungFleetDiscover();
+    if (!discovered?.ok) throw new Error(discovered?.error || 'Samsung discovery failed');
+    samsungFleet = discovered.tvs || [];
+    samsungFleetState = new Map();
+    if (!samsungFleet.length) {
+      const detail = (discovered.diagnostics || []).map((d) =>
+        `${d.interface || 'LAN'} ${d.localIP || ''}: ${d.count || 0}`
+      ).join(', ');
+      throw new Error(`No Samsung TVs discovered${detail ? ' (' + detail + ')' : ''}`);
+    }
+    renderSamsungFleet();
+
+    const mediaUrl = `http://${discovered.localIP}:8081/tv/live/index.m3u8`;
+    if ($('fleetMediaUrl')) $('fleetMediaUrl').value = mediaUrl;
+    log(`5/6 Sending ${mediaUrl} to ${samsungFleet.length} TV(s)...`);
+
+    const play = await API.samsungFleetActionAll({ action: 'play-url', value: mediaUrl });
+    const failed = (play?.results || []).filter((item) => !item.ok);
+    if (failed.length) {
+      const detail = failed.map((item) => `${item.ip}: ${item.errorDescription || item.errorCode || item.error || item.statusCode || 'failed'}`).join('; ');
+      throw new Error(`Playback command failed on ${failed.length} TV(s): ${detail}`);
+    }
+
+    log('6/6 Verifying AVTransport PLAYING...');
+    let states = [];
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const status = await API.samsungFleetStatus();
+      states = status?.states || [];
+      for (const state of states) samsungFleetState.set(state.ip, state);
+      renderSamsungFleet();
+      if (states.length === samsungFleet.length && states.every((state) => state.transport === 'PLAYING')) break;
+      await new Promise((resolve) => setTimeout(resolve, 750));
+    }
+
+    const notPlaying = states.filter((state) => state.transport !== 'PLAYING');
+    if (notPlaying.length) {
+      const detail = notPlaying.map((state) => `${state.ip}=${state.transport || 'UNKNOWN'}`).join(', ');
+      throw new Error(`TV playback not confirmed: ${detail}`);
+    }
+
+    log(`READY: ${states.length}/${states.length} TVs confirmed PLAYING.`);
+    showToast(`Samsung Mode ready: ${states.length} TV(s) PLAYING`, 'success');
+  } catch (err) {
+    log(`FAILED: ${err.message}`);
+    showToast(err.message, 'error');
+  } finally {
+    if (button) button.disabled = false;
+    await refreshSamsungStatus();
+    await refreshServerRuntimeStatus();
+  }
+}
+
 function init() {
   loadSettings().then(() => {
     refreshData();
@@ -611,6 +706,7 @@ function init() {
     }
   });
 
+  $('samsungModeBtn').addEventListener('click', startSamsungMode);
   $('samsungRefreshBtn').addEventListener('click', async () => {
     await refreshSamsungStatus();
     await refreshServerRuntimeStatus();
