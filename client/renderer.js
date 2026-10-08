@@ -463,6 +463,8 @@ function renderSamsungFleet() {
   const body = $('samsungFleetBody');
   if (!body) return;
   $('fleetCount').textContent = String(samsungFleet.length);
+  $('fleetKnownCount').textContent = String(samsungFleet.filter((tv) => tv.known).length);
+  $('fleetOnlineCount').textContent = String(samsungFleet.filter((tv) => tv.online).length);
   $('fleetAvCount').textContent = String(samsungFleet.filter((tv) => tv.capabilities?.avTransport).length);
   $('fleetRcCount').textContent = String(samsungFleet.filter((tv) => tv.capabilities?.renderingControl).length);
   $('fleetPlaying').textContent = String(
@@ -470,7 +472,7 @@ function renderSamsungFleet() {
   );
 
   if (!samsungFleet.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty">No Samsung TVs discovered.</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="empty">No Samsung TVs discovered.</td></tr>';
     return;
   }
 
@@ -478,19 +480,23 @@ function renderSamsungFleet() {
     const state = samsungFleetState.get(tv.ip) || {};
     const volume = Number.isFinite(state.volume) ? state.volume : 20;
     const muted = state.muted === true;
-    const canPlay = tv.capabilities?.setAVTransportURI && tv.capabilities?.play;
+    const canPlay = tv.online && tv.capabilities?.setAVTransportURI && tv.capabilities?.play;
+    const lastError = state.errors?.join('; ') || tv.probeError || '';
     return `<tr data-tv-ip="${escapeHtml(tv.ip)}">
       <td><strong>${escapeHtml(tv.friendlyName || 'Samsung TV')}</strong></td>
       <td><code>${escapeHtml(tv.ip)}</code></td>
       <td>${escapeHtml(tv.modelName || '—')}</td>
+      <td>${tv.online ? 'ONLINE' : 'OFFLINE / UNREACHABLE'}</td>
+      <td>${tv.capabilitiesKnown ? (tv.capabilities?.avTransport ? 'AVAILABLE' : 'NOT FOUND') : 'UNKNOWN'}</td>
       <td>${escapeHtml(state.transport || 'UNKNOWN')}</td>
+      <td>${escapeHtml(lastError || '—')}</td>
       <td><input class="fleet-volume" type="number" min="0" max="100" value="${volume}" style="width:72px"></td>
       <td>${muted ? 'Muted' : 'On'}</td>
       <td><div class="actions">
         <button class="btn btn-sm btn-primary" data-fleet-action="play-url" ${canPlay ? '' : 'disabled'}>Play URL</button>
-        <button class="btn btn-sm" data-fleet-action="stop" ${tv.capabilities?.stop ? '' : 'disabled'}>Stop</button>
-        <button class="btn btn-sm" data-fleet-action="volume" ${tv.capabilities?.renderingControl ? '' : 'disabled'}>Set Vol</button>
-        <button class="btn btn-sm" data-fleet-action="${muted ? 'unmute' : 'mute'}" ${tv.capabilities?.renderingControl ? '' : 'disabled'}>${muted ? 'Unmute' : 'Mute'}</button>
+        <button class="btn btn-sm" data-fleet-action="stop" ${tv.online && tv.capabilities?.stop ? '' : 'disabled'}>Stop</button>
+        <button class="btn btn-sm" data-fleet-action="volume" ${tv.online && tv.capabilities?.renderingControl ? '' : 'disabled'}>Set Vol</button>
+        <button class="btn btn-sm" data-fleet-action="${muted ? 'unmute' : 'mute'}" ${tv.online && tv.capabilities?.renderingControl ? '' : 'disabled'}>${muted ? 'Unmute' : 'Mute'}</button>
       </div></td>
     </tr>`;
   }).join('');
@@ -508,7 +514,19 @@ async function discoverSamsungFleet() {
       $('fleetMediaUrl').value = `http://${result.localIP}:8081/tv/live/index.m3u8`;
     }
     renderSamsungFleet();
-    showToast(`Discovered ${samsungFleet.length} Samsung TV(s)`, 'success');
+    const output = $('builderOutput');
+    if (output) {
+      const lines = ['Samsung fleet discovery:', `Known TVs: ${samsungFleet.filter((tv) => tv.known).length}; online: ${samsungFleet.filter((tv) => tv.online).length}`];
+      for (const diagnostic of result.diagnostics || []) {
+        lines.push(`${diagnostic.interface} ${diagnostic.localIP}: M-SEARCH ${diagnostic.mSearchSent ? 'sent' : 'failed'}, responses ${diagnostic.responses || 0}, hydrated ${diagnostic.hydrated || 0}${diagnostic.descriptionFailures ? `, description failures ${diagnostic.descriptionFailures}` : ''}${diagnostic.error ? `, error ${diagnostic.error}` : ''}`);
+      }
+      for (const tv of samsungFleet.filter((item) => item.known)) {
+        lines.push(`${tv.friendlyName} ${tv.ip}: ${tv.online ? 'ONLINE' : 'OFFLINE / UNREACHABLE'}; open ports ${tv.openPorts?.join(', ') || 'none'}; AVTransport ${tv.capabilitiesKnown ? (tv.capabilities?.avTransport ? 'verified' : 'not found') : 'unknown'}`);
+      }
+      output.textContent += (output.textContent ? '\n' : '') + lines.join('\n') + '\n';
+    }
+    const online = samsungFleet.filter((tv) => tv.online).length;
+    showToast(`Samsung fleet: ${online}/${samsungFleet.filter((tv) => tv.known).length} known TVs online`, online ? 'success' : 'error');
     await refreshSamsungFleetState();
   } catch (err) {
     showToast(err.message, 'error');
@@ -555,6 +573,53 @@ async function runSamsungFleetAll(action, value) {
   await refreshSamsungFleetState();
 }
 
+async function stopSamsungWall() {
+  const button = $('samsungStopWallBtn');
+  if (button) button.disabled = true;
+  const output = $('builderOutput');
+  const log = (message) => {
+    if (output) output.textContent += (output.textContent.endsWith('\n') ? '' : '\n') + message + '\n';
+  };
+  try {
+    log('Stopping TV Wall...');
+    const result = await API.stopTVWall();
+    for (const tv of result?.tvResults || []) {
+      log(`${tv.ip}: ${tv.skipped ? 'SKIPPED' : tv.ok ? 'STOPPED' : 'STOP FAILED'}${tv.error ? ` — ${tv.error}` : ''}`);
+    }
+    const gatewayStopped = result?.gateway?.ok || result?.gateway?.statusCode === 409;
+    log(`Samsung gateway: ${gatewayStopped ? 'STOPPED' : 'STOP FAILED'}${result?.gateway?.error ? ` — ${result.gateway.error}` : ''}`);
+    log(result?.ok ? 'TV Wall stopped.' : 'TV Wall stopped with per-device errors.');
+    showToast(result?.ok ? 'TV Wall stopped' : 'TV Wall stopped with errors', result?.ok ? 'success' : 'error');
+  } catch (err) {
+    log(`STOP TV WALL FAILED: ${err.message}`);
+    showToast(err.message, 'error');
+  } finally {
+    if (button) button.disabled = false;
+    await refreshSamsungStatus();
+  }
+}
+
+async function testSamsungHls() {
+  const button = $('samsungHlsTestBtn');
+  if (button) button.disabled = true;
+  try {
+    const result = await API.samsungHlsTest();
+    if (!result?.ok) throw new Error(result?.error || 'HLS smoke test failed');
+    const message = `HLS READY: playlist HTTP ${result.playlistStatus}; newest segment ${result.segment} HTTP ${result.segmentStatus}; playlist advanced to ${result.nextSegment}.`;
+    const output = $('builderOutput');
+    if (output) output.textContent += (output.textContent.endsWith('\n') ? '' : '\n') + message + '\n';
+    showToast('HLS playlist and segment are ready and advancing', 'success');
+    return result;
+  } catch (err) {
+    const output = $('builderOutput');
+    if (output) output.textContent += (output.textContent.endsWith('\n') ? '' : '\n') + `HLS NOT READY: ${err.message}\n`;
+    showToast(err.message, 'error');
+    return { ok: false, error: err.message };
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 async function startSamsungMode() {
   const button = $('samsungModeBtn');
   if (button) button.disabled = true;
@@ -597,49 +662,82 @@ async function startSamsungMode() {
     }
     if (!ready) throw new Error('Samsung HLS playlist did not become ready');
 
+    log('3/6 Testing the live HLS playlist and newest segment...');
+    const hls = await API.samsungHlsTest();
+    if (!hls?.ok) throw new Error(hls?.error || 'Live HLS smoke test failed');
+    log(`HLS READY: ${hls.segment} returned HTTP ${hls.segmentStatus}; playlist advanced to ${hls.nextSegment}.`);
+
     log('4/6 Discovering Samsung TVs...');
     const discovered = await API.samsungFleetDiscover();
     if (!discovered?.ok) throw new Error(discovered?.error || 'Samsung discovery failed');
     samsungFleet = discovered.tvs || [];
     samsungFleetState = new Map();
-    if (!samsungFleet.length) {
-      const detail = (discovered.diagnostics || []).map((d) =>
-        `${d.interface || 'LAN'} ${d.localIP || ''}: ${d.count || 0}`
-      ).join(', ');
-      throw new Error(`No Samsung TVs discovered${detail ? ' (' + detail + ')' : ''}`);
-    }
     renderSamsungFleet();
+    for (const diagnostic of discovered.diagnostics || []) {
+      log(`${diagnostic.interface} ${diagnostic.localIP}: M-SEARCH ${diagnostic.mSearchSent ? 'sent' : 'failed'}, responses ${diagnostic.responses || 0}, hydrated ${diagnostic.hydrated || 0}${diagnostic.error ? `, error ${diagnostic.error}` : ''}`);
+    }
+    for (const tv of samsungFleet.filter((item) => item.known)) {
+      log(`${tv.friendlyName} ${tv.ip}: ${tv.online ? 'ONLINE' : 'OFFLINE / UNREACHABLE'}; open ports ${tv.openPorts?.join(', ') || 'none'}; AVTransport ${tv.capabilitiesKnown ? (tv.capabilities?.avTransport ? 'verified' : 'not found') : 'unknown'}`);
+    }
+
+    if (!discovered.localIP) throw new Error(discovered.warning || 'No physical private LAN IPv4 address was detected');
 
     const mediaUrl = `http://${discovered.localIP}:8081/tv/live/index.m3u8`;
     if ($('fleetMediaUrl')) $('fleetMediaUrl').value = mediaUrl;
-    log(`5/6 Sending ${mediaUrl} to ${samsungFleet.length} TV(s)...`);
-
-    const play = await API.samsungFleetActionAll({ action: 'play-url', value: mediaUrl });
-    const failed = (play?.results || []).filter((item) => !item.ok);
-    if (failed.length) {
-      const detail = failed.map((item) => `${item.ip}: ${item.errorDescription || item.errorCode || item.error || item.statusCode || 'failed'}`).join('; ');
-      throw new Error(`Playback command failed on ${failed.length} TV(s): ${detail}`);
+    const playbackCandidates = samsungFleet.filter((tv) => tv.online && tv.capabilities?.setAVTransportURI && tv.capabilities?.play);
+    const unavailable = samsungFleet.filter((tv) => !tv.online || !tv.capabilities?.setAVTransportURI || !tv.capabilities?.play);
+    for (const tv of unavailable) {
+      const reason = !tv.online ? 'OFFLINE' : 'AVTransport capability not verified';
+      log(`${tv.friendlyName || tv.ip}: ${reason}; playback skipped.`);
     }
+    if (!playbackCandidates.length) throw new Error('No online TV has verified AVTransport SetAVTransportURI and Play capabilities. See per-TV diagnostics above.');
+
+    log(`5/6 Sending ${mediaUrl} to ${playbackCandidates.length} verified online TV(s)...`);
+    const playbackResults = await Promise.allSettled(playbackCandidates.map((tv) =>
+      API.samsungFleetAction({ ip: tv.ip, action: 'play-url', value: mediaUrl })
+    ));
+    const playbackByIP = new Map();
+    playbackResults.forEach((settled, index) => {
+      const tv = playbackCandidates[index];
+      const result = settled.status === 'fulfilled' ? settled.value : { ok: false, error: settled.reason?.message || 'IPC request failed' };
+      playbackByIP.set(tv.ip, result);
+      const setUri = result.setUri;
+      const setUriState = setUri ? (setUri.ok ? 'SUCCESS' : `FAILED ${setUri.errorDescription || setUri.errorCode || setUri.error || setUri.statusCode}`) : (result.ok ? 'SUCCESS' : 'FAILED');
+      log(`${tv.friendlyName} ${tv.ip}: SetAVTransportURI ${setUriState}; Play ${result.ok ? 'ACCEPTED' : `FAILED ${result.errorDescription || result.errorCode || result.error || result.statusCode || 'unknown error'}`}`);
+    });
 
     log('6/6 Verifying AVTransport PLAYING...');
     let states = [];
-    for (let attempt = 0; attempt < 12; attempt++) {
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
       const status = await API.samsungFleetStatus();
       states = status?.states || [];
       for (const state of states) samsungFleetState.set(state.ip, state);
       renderSamsungFleet();
-      if (states.length === samsungFleet.length && states.every((state) => state.transport === 'PLAYING')) break;
+      const candidateStates = playbackCandidates.map((tv) => states.find((state) => state.ip === tv.ip));
+      if (candidateStates.every((state) => state && (state.transport === 'PLAYING' || playbackByIP.get(state.ip)?.ok !== true))) break;
       await new Promise((resolve) => setTimeout(resolve, 750));
     }
 
-    const notPlaying = states.filter((state) => state.transport !== 'PLAYING');
-    if (notPlaying.length) {
-      const detail = notPlaying.map((state) => `${state.ip}=${state.transport || 'UNKNOWN'}`).join(', ');
-      throw new Error(`TV playback not confirmed: ${detail}`);
+    const candidateStates = playbackCandidates.map((tv) => states.find((state) => state.ip === tv.ip));
+    let playing = 0;
+    for (let index = 0; index < playbackCandidates.length; index++) {
+      const tv = playbackCandidates[index];
+      const state = candidateStates[index];
+      const command = playbackByIP.get(tv.ip);
+      if (command?.ok && state?.transport === 'PLAYING') {
+        playing += 1;
+        log(`${tv.friendlyName} ${tv.ip}: PLAYING CONFIRMED; physical video observation still required.`);
+      } else if (!command?.ok) {
+        log(`${tv.friendlyName} ${tv.ip}: COMMAND FAILED; ${command?.errorDescription || command?.errorCode || command?.error || 'unknown error'}`);
+      } else {
+        log(`${tv.friendlyName} ${tv.ip}: NOT PLAYING (${state?.transport || 'UNKNOWN'}); physical TV observation required for diagnosis.`);
+      }
     }
 
-    log(`READY: ${states.length}/${states.length} TVs confirmed PLAYING.`);
-    showToast(`Samsung Mode ready: ${states.length} TV(s) PLAYING`, 'success');
+    log(`SOFTWARE PLAYBACK: ${playing}/${playbackCandidates.length} verified online TV(s) confirmed PLAYING.`);
+    log('PHYSICAL VIDEO CONFIRMATION REQUIRED.');
+    showToast(playing ? `Samsung Mode: ${playing}/${playbackCandidates.length} TV(s) PLAYING` : 'Samsung Mode: no TV confirmed PLAYING', playing ? 'success' : 'error');
   } catch (err) {
     log(`FAILED: ${err.message}`);
     showToast(err.message, 'error');
@@ -705,6 +803,8 @@ function init() {
   });
 
   $('samsungModeBtn').addEventListener('click', startSamsungMode);
+  $('samsungStopWallBtn')?.addEventListener('click', stopSamsungWall);
+  $('samsungHlsTestBtn')?.addEventListener('click', testSamsungHls);
   $('samsungRefreshBtn').addEventListener('click', async () => {
     await refreshSamsungStatus();
     await refreshServerRuntimeStatus();

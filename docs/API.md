@@ -194,6 +194,8 @@ viewers. It must not be presented as a complete WebRTC media service.
 
 - `GET /tv`, `GET /tv/`, `GET /tv/basic` — legacy-browser pages (ES5, no
   JavaScript framework, native `<video>`).
+- `GET /tv/test.mp4` — fixed 720p H.264 Baseline/AAC-LC compatibility clip
+  for isolating TV decoding from the live HLS gateway.
 - `GET /tv/live/index.m3u8`, `GET /tv/live/segment_*.ts` — gateway HLS,
   served only while the gateway reports live with a ready playlist;
   `.m3u8` is `application/vnd.apple.mpegurl` (no cache), `.ts` is

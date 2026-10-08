@@ -264,6 +264,7 @@ func TestSamsungTVPagesAndReadOnlyStatus(t *testing.T) {
 	for name, contents := range map[string]string{
 		"index.html": "tv page",
 		"basic.html": "basic page",
+		"test.mp4":   "generated compatibility clip",
 	} {
 		if err := os.WriteFile(filepath.Join(webDir, name), []byte(contents), 0o600); err != nil {
 			t.Fatalf("write TV page: %v", err)
@@ -284,6 +285,11 @@ func TestSamsungTVPagesAndReadOnlyStatus(t *testing.T) {
 		if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), want) {
 			t.Errorf("GET %s returned %d with body %q", path, res.Code, res.Body.String())
 		}
+	}
+	clip := httptest.NewRecorder()
+	server.Handler().ServeHTTP(clip, httptest.NewRequest(http.MethodGet, "/tv/test.mp4", nil))
+	if clip.Code != http.StatusOK || clip.Header().Get("Content-Type") != "video/mp4" || clip.Body.String() != "generated compatibility clip" {
+		t.Fatalf("test MP4 endpoint returned status=%d content-type=%q body=%q", clip.Code, clip.Header().Get("Content-Type"), clip.Body.String())
 	}
 	res := httptest.NewRecorder()
 	server.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/api/v1/tv/status", nil))

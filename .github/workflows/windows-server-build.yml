@@ -58,6 +58,7 @@ jobs:
           Copy-Item dist/stremdbc.exe dist/package/stremdbc.exe
           Copy-Item configs/samsung-f5500.yaml dist/package/configs/samsung-f5500.yaml
           Copy-Item -Recurse web/tv dist/package/web/tv
+          if (-not (Test-Path dist/package/web/tv/test.mp4)) { throw "TV compatibility clip missing from package" }
           Copy-Item scripts/windows/samsung-tv-*.ps1 dist/package/scripts/windows/
           Copy-Item scripts/windows/samsung-vmix-setup.ps1 dist/package/scripts/windows/
           Copy-Item scripts/windows/rebuild-samsung-server.ps1 dist/package/scripts/windows/

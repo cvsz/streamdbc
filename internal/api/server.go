@@ -279,6 +279,7 @@ func (s *Server) SetSamsungTV(manager *samsung.Manager, cfg config.SamsungTVConf
 		s.registerRoute("/tv", page("index.html"))
 		s.registerRoute("/tv/", page("index.html"))
 		s.registerRoute("/tv/basic", page("basic.html"))
+		s.registerRoute("/tv/test.mp4", page("test.mp4"))
 	}
 	if cfg.Enable && cfg.OutputPath != "" && manager != nil {
 		s.registerRoute("/tv/live/", samsungHLShandler(cfg.OutputPath, func() bool {

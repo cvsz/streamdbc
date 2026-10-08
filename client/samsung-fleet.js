@@ -223,14 +223,16 @@ function discoverSsdp(localIP, timeoutMs = 4500) {
   });
 }
 
-async function discoverFleet(localIP, timeoutMs = 4500) {
+async function discoverFleetDetailed(localIP, timeoutMs = 4500) {
   const responses = await discoverSsdp(localIP, timeoutMs);
   const unique = new Map();
   for (const item of responses) unique.set(item.ip + '|' + item.location, item);
   const descriptions = [];
+  let descriptionFailures = 0;
   for (const item of unique.values()) {
     const device = await hydrateDescription(item.ip, item.location, item);
     if (device) descriptions.push(device);
+    else descriptionFailures += 1;
   }
 
   const groups = new Map();
@@ -282,9 +284,27 @@ async function discoverFleet(localIP, timeoutMs = 4500) {
     });
   }
 
-  return merged.sort((a, b) =>
-    a.ip.localeCompare(b.ip, undefined, { numeric: true })
-  );
+  return {
+    tvs: merged.sort((a, b) => a.ip.localeCompare(b.ip, undefined, { numeric: true })),
+    diagnostics: {
+      mSearchSent: true,
+      responses: responses.length,
+      uniqueLocations: unique.size,
+      hydrated: descriptions.length,
+      descriptionFailures
+    }
+  };
+}
+
+async function discoverFleet(localIP, timeoutMs = 4500) {
+  const result = await discoverFleetDetailed(localIP, timeoutMs);
+  return result.tvs;
+}
+
+async function hydrateKnownDescription(device) {
+  if (!device || typeof device.ip !== 'string' || !isPrivateIPv4(device.ip)) return null;
+  try { safeLegacyUrl(device.location, device.ip); } catch { return null; }
+  return hydrateDescription(device.ip, device.location, { server: device.server || '' });
 }
 
 function serviceFor(tv, type) {
@@ -362,34 +382,44 @@ async function getTVState(tv) {
   return result;
 }
 
-async function runTVAction(tv, action, value) {
+async function runTVAction(tv, action, value, request = soapRequest) {
+  const retryRequest = async (serviceType, name, args, maxAttempts) => {
+    let result;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      result = await request(tv, serviceType, name, args);
+      if (result.ok) return result;
+    }
+    return result;
+  };
+
   switch (action) {
     case 'play-url': {
       const u = new URL(String(value || ''));
       if (!['http:', 'https:'].includes(u.protocol)) throw new Error('Media URL must be HTTP(S)');
-      const set = await soapRequest(tv, SERVICE.av, 'SetAVTransportURI', {
+      const set = await retryRequest(SERVICE.av, 'SetAVTransportURI', {
         InstanceID: 0, CurrentURI: u.toString(), CurrentURIMetaData: ''
-      });
-      if (!set.ok) return set;
-      return soapRequest(tv, SERVICE.av, 'Play', { InstanceID: 0, Speed: 1 });
+      }, 2);
+      if (!set.ok) return { ...set, phase: 'SET_URI_FAILED', setUri: set };
+      const play = await retryRequest(SERVICE.av, 'Play', { InstanceID: 0, Speed: 1 }, 3);
+      return { ...play, phase: play.ok ? 'PLAY_ACCEPTED' : 'PLAY_FAILED', setUri: set };
     }
     case 'play':
-      return soapRequest(tv, SERVICE.av, 'Play', { InstanceID: 0, Speed: 1 });
+      return request(tv, SERVICE.av, 'Play', { InstanceID: 0, Speed: 1 });
     case 'pause':
-      return soapRequest(tv, SERVICE.av, 'Pause', { InstanceID: 0 });
+      return request(tv, SERVICE.av, 'Pause', { InstanceID: 0 });
     case 'stop':
-      return soapRequest(tv, SERVICE.av, 'Stop', { InstanceID: 0 });
+      return request(tv, SERVICE.av, 'Stop', { InstanceID: 0 });
     case 'mute':
-      return soapRequest(tv, SERVICE.rendering, 'SetMute', { InstanceID: 0, Channel: 'Master', DesiredMute: value ? 1 : 0 });
+      return request(tv, SERVICE.rendering, 'SetMute', { InstanceID: 0, Channel: 'Master', DesiredMute: value ? 1 : 0 });
     case 'volume': {
       const volume = Math.max(0, Math.min(100, Number(value)));
       if (!Number.isFinite(volume)) throw new Error('Volume must be numeric');
-      return soapRequest(tv, SERVICE.rendering, 'SetVolume', { InstanceID: 0, Channel: 'Master', DesiredVolume: Math.round(volume) });
+      return request(tv, SERVICE.rendering, 'SetVolume', { InstanceID: 0, Channel: 'Master', DesiredVolume: Math.round(volume) });
     }
     case 'open-browser': {
       const u = new URL(String(value || ''));
       if (!['http:', 'https:'].includes(u.protocol)) throw new Error('Browser URL must be HTTP(S)');
-      return soapRequest(tv, SERVICE.mainTv, 'RunBrowser', { BrowserURL: u.toString() });
+      return request(tv, SERVICE.mainTv, 'RunBrowser', { BrowserURL: u.toString() });
     }
     default:
       throw new Error('Unsupported Samsung TV action');
@@ -398,6 +428,8 @@ async function runTVAction(tv, action, value) {
 
 module.exports = {
   discoverFleet,
+  discoverFleetDetailed,
   getTVState,
+  hydrateKnownDescription,
   runTVAction
 };

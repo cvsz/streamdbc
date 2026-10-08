@@ -1,8 +1,14 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const test = require('node:test');
-const { handleWindowClose, handleWindowAllClosed } = require('../window-lifecycle');
+const {
+  createBeforeQuitHandler,
+  handleWindowClose,
+  handleWindowAllClosed,
+  terminateManagedProcessTree
+} = require('../window-lifecycle');
 
 test('closing the main window is not intercepted to keep the process in the tray', () => {
   let prevented = false;
@@ -47,4 +53,99 @@ test('closing the last macOS window keeps the app running', () => {
 
   assert.equal(trayDestroyCalls, 0);
   assert.equal(quitCalls, 0);
+});
+
+test('before-quit stops the Control Panel owned server before allowing app exit', async () => {
+  const child = { pid: 42, exitCode: null, signalCode: null };
+  let prevented = false;
+  let saved = 0;
+  let quitCalls = 0;
+  let stopped = 0;
+  const app = { quit: () => { quitCalls += 1; } };
+  const onBeforeQuit = createBeforeQuitHandler({
+    app,
+    getManagedProcess: () => child,
+    saveSettings: () => { saved += 1; },
+    terminateProcessTree: async (process) => {
+      assert.equal(process, child);
+      stopped += 1;
+      child.exitCode = 0;
+    },
+    platform: 'win32'
+  });
+
+  onBeforeQuit({ preventDefault: () => { prevented = true; } });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(prevented, true);
+  assert.equal(stopped, 1);
+  assert.equal(quitCalls, 1);
+  assert.equal(saved, 1);
+
+  let preventedOnFinalQuit = false;
+  onBeforeQuit({ preventDefault: () => { preventedOnFinalQuit = true; } });
+  assert.equal(preventedOnFinalQuit, false);
+  assert.equal(saved, 2);
+});
+
+test('before-quit keeps the app open and permits retry if managed process cleanup fails', async () => {
+  const child = { pid: 43, exitCode: null, signalCode: null };
+  let prevented = false;
+  let saved = 0;
+  let quitCalls = 0;
+  let attempts = 0;
+  const app = { isQuitting: true, quit: () => { quitCalls += 1; } };
+  const onBeforeQuit = createBeforeQuitHandler({
+    app,
+    getManagedProcess: () => child,
+    saveSettings: () => { saved += 1; },
+    terminateProcessTree: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('cleanup timed out');
+      child.exitCode = 0;
+    },
+    platform: 'win32'
+  });
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    onBeforeQuit({ preventDefault: () => { prevented = true; } });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(prevented, true);
+    assert.equal(quitCalls, 0);
+    assert.equal(app.isQuitting, false);
+
+    onBeforeQuit({ preventDefault: () => {} });
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    console.error = originalConsoleError;
+  }
+
+  assert.equal(attempts, 2);
+  assert.equal(quitCalls, 1);
+  assert.equal(saved, 2);
+});
+
+test('Windows cleanup terminates the owned PID tree with taskkill /T', async () => {
+  const child = new EventEmitter();
+  child.pid = 4242;
+  child.exitCode = null;
+  child.signalCode = null;
+  let taskkillArgs;
+  const spawnCommand = (executable, args) => {
+    assert.equal(executable, 'taskkill.exe');
+    taskkillArgs = args;
+    const command = new EventEmitter();
+    setImmediate(() => {
+      child.exitCode = 0;
+      child.emit('exit', 0, null);
+      command.emit('close', 0);
+    });
+    return command;
+  };
+
+  await terminateManagedProcessTree(child, 'win32', spawnCommand);
+
+  assert.deepEqual(taskkillArgs, ['/PID', '4242', '/T', '/F']);
 });
