@@ -1,8 +1,10 @@
 const dgram = require('dgram');
 const http = require('http');
+const https = require('https');
 
 const SSDP_HOST = '239.255.255.250';
 const SSDP_PORT = 1900;
+const SAMSUNG_LAN_PORTS = new Set([80, 443, 4443, 6000, 7676, 52345, 55000, 55001]);
 const SERVICE = {
   av: 'urn:schemas-upnp-org:service:AVTransport:1',
   rendering: 'urn:schemas-upnp-org:service:RenderingControl:1',
@@ -45,11 +47,17 @@ function parseSsdpHeaders(text) {
 function safeLegacyUrl(value, expectedIP = '') {
   let u;
   try { u = new URL(value); } catch { throw new Error('Invalid UPnP URL'); }
-  if (u.protocol !== 'http:' || !isPrivateIPv4(u.hostname)) throw new Error('UPnP URL must be private-lan HTTP');
+  if (!['http:', 'https:'].includes(u.protocol) || !isPrivateIPv4(u.hostname)) {
+    throw new Error('UPnP URL must be private-lan HTTP(S)');
+  }
   if (expectedIP && u.hostname !== expectedIP) throw new Error('UPnP URL host does not match SSDP responder');
-  const port = Number(u.port || 80);
-  if (![80, 7676].includes(port)) throw new Error('Unexpected Samsung UPnP port');
+  const port = Number(u.port || (u.protocol === 'https:' ? 443 : 80));
+  if (!SAMSUNG_LAN_PORTS.has(port)) throw new Error('Unexpected Samsung UPnP port');
   return u;
+}
+
+function requestTransport(u) {
+  return u.protocol === 'https:' ? https : http;
 }
 
 function getText(urlValue, expectedIP, timeoutMs = 4000) {
@@ -58,8 +66,10 @@ function getText(urlValue, expectedIP, timeoutMs = 4000) {
     try { u = safeLegacyUrl(urlValue, expectedIP); } catch (err) {
       resolve({ ok: false, statusCode: 0, body: '', error: err.message }); return;
     }
-    const req = http.get(u, {
-      headers: { 'User-Agent': 'StreamDBC-SamsungFleet/1.0', Accept: 'text/xml,*/*' }
+    const transport = requestTransport(u);
+    const req = transport.get(u, {
+      headers: { 'User-Agent': 'StreamDBC-SamsungFleet/1.0', Accept: 'text/xml,*/*' },
+      ...(u.protocol === 'https:' ? { rejectUnauthorized: false } : {})
     }, (res) => {
       let body = '';
       res.setEncoding('utf8');
@@ -291,8 +301,10 @@ function soapRequest(tv, serviceType, action, args = {}, timeoutMs = 5000) {
     argXml + '</u:' + action + '></s:Body></s:Envelope>';
 
   return new Promise((resolve) => {
-    const req = http.request(u, {
+    const transport = requestTransport(u);
+    const req = transport.request(u, {
       method: 'POST',
+      ...(u.protocol === 'https:' ? { rejectUnauthorized: false } : {}),
       headers: {
         'Content-Type': 'text/xml; charset="utf-8"',
         SOAPACTION: '"' + serviceType + '#' + action + '"',
