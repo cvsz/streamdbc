@@ -348,13 +348,13 @@ function createMainWindow() {
   });
 
   mainWindow.on('show', () => {
-    if (tray) {
+    if (process.platform === 'darwin' && tray && typeof tray.setHighlightMode === 'function') {
       tray.setHighlightMode('always');
     }
   });
 
   mainWindow.on('hide', () => {
-    if (tray) {
+    if (process.platform === 'darwin' && tray && typeof tray.setHighlightMode === 'function') {
       tray.setHighlightMode('never');
     }
   });
