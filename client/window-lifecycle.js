@@ -1,9 +1,17 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const expectedManagedProcessStops = new WeakSet();
 
 function hasExited(child) {
   return !child || child.exitCode !== null && child.exitCode !== undefined || child.signalCode !== null && child.signalCode !== undefined;
+}
+
+function getUnexpectedManagedProcessExitError(child, code, signal) {
+  if (child && typeof child === 'object' && expectedManagedProcessStops.has(child)) return null;
+  if (code && code !== 0) return `stremdbc.exe exited with code ${code}`;
+  if (signal) return `stremdbc.exe exited after signal ${signal}`;
+  return null;
 }
 
 function waitForExit(child, timeoutMs) {
@@ -43,21 +51,27 @@ function runCommand(executable, args, spawnCommand) {
 async function terminateManagedProcessTree(child, platform = process.platform, spawnCommand = spawn) {
   if (hasExited(child)) return;
 
-  if (platform === 'win32' && Number.isInteger(child.pid) && child.pid > 0) {
-    try {
-      const killed = await runCommand('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], spawnCommand);
-      if (killed && await waitForExit(child, 3000)) return;
-    } catch {}
-  } else if (platform !== 'win32') {
-    try { child.kill('SIGTERM'); } catch {}
-    if (await waitForExit(child, 2000)) return;
-    try { child.kill('SIGKILL'); } catch {}
-    if (await waitForExit(child, 1000)) return;
-  }
+  expectedManagedProcessStops.add(child);
+  try {
+    if (platform === 'win32' && Number.isInteger(child.pid) && child.pid > 0) {
+      try {
+        const killed = await runCommand('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], spawnCommand);
+        if (killed && await waitForExit(child, 3000)) return;
+      } catch {}
+    } else if (platform !== 'win32') {
+      try { child.kill('SIGTERM'); } catch {}
+      if (await waitForExit(child, 2000)) return;
+      try { child.kill('SIGKILL'); } catch {}
+      if (await waitForExit(child, 1000)) return;
+    }
 
-  try { child.kill(); } catch {}
-  if (!await waitForExit(child, 2000)) {
-    throw new Error('The Control Panel could not confirm that its managed server process exited');
+    try { child.kill(); } catch {}
+    if (!await waitForExit(child, 2000)) {
+      throw new Error('The Control Panel could not confirm that its managed server process exited');
+    }
+  } catch (err) {
+    expectedManagedProcessStops.delete(child);
+    throw err;
   }
 }
 
@@ -105,5 +119,6 @@ module.exports = {
   createBeforeQuitHandler,
   handleWindowAllClosed,
   handleWindowClose,
-  terminateManagedProcessTree
+  terminateManagedProcessTree,
+  getUnexpectedManagedProcessExitError
 };

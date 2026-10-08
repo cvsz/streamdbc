@@ -7,7 +7,8 @@ const {
   createBeforeQuitHandler,
   handleWindowClose,
   handleWindowAllClosed,
-  terminateManagedProcessTree
+  terminateManagedProcessTree,
+  getUnexpectedManagedProcessExitError
 } = require('../window-lifecycle');
 
 test('closing the main window is not intercepted to keep the process in the tray', () => {
@@ -133,13 +134,17 @@ test('Windows cleanup terminates the owned PID tree with taskkill /T', async () 
   child.exitCode = null;
   child.signalCode = null;
   let taskkillArgs;
+  let exitError;
+  child.once('exit', (code, signal) => {
+    exitError = getUnexpectedManagedProcessExitError(child, code, signal);
+  });
   const spawnCommand = (executable, args) => {
     assert.equal(executable, 'taskkill.exe');
     taskkillArgs = args;
     const command = new EventEmitter();
     setImmediate(() => {
-      child.exitCode = 0;
-      child.emit('exit', 0, null);
+      child.exitCode = 1;
+      child.emit('exit', 1, null);
       command.emit('close', 0);
     });
     return command;
@@ -148,4 +153,13 @@ test('Windows cleanup terminates the owned PID tree with taskkill /T', async () 
   await terminateManagedProcessTree(child, 'win32', spawnCommand);
 
   assert.deepEqual(taskkillArgs, ['/PID', '4242', '/T', '/F']);
+  assert.equal(exitError, null, 'a forced exit during requested cleanup must not become a server error');
+});
+
+test('unexpected managed server failures keep their exit error', () => {
+  const child = {};
+
+  assert.equal(getUnexpectedManagedProcessExitError(child, 1, null), 'stremdbc.exe exited with code 1');
+  assert.equal(getUnexpectedManagedProcessExitError(child, null, 'SIGTERM'), 'stremdbc.exe exited after signal SIGTERM');
+  assert.equal(getUnexpectedManagedProcessExitError(child, 0, null), null);
 });
