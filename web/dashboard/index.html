@@ -21,7 +21,11 @@
 <body>
 <header>
   <div><h1>STREMDBC Control Plane</h1><div class="sub" id="version">Streaming management & observability</div></div>
-  <div class="status"><span id="healthDot" class="dot"></span><span id="healthText">Connecting…</span></div>
+  <div class="status">
+    <input id="apiKey" type="password" placeholder="API key" autocomplete="off" style="width:180px;border:1px solid #31425f;background:#0d1727;color:#e5edf8;border-radius:8px;padding:7px 9px">
+    <button id="saveApiKey">Use key</button>
+    <span id="healthDot" class="dot"></span><span id="healthText">Connecting…</span>
+  </div>
 </header>
 <main>
   <section class="grid" aria-label="Platform summary">
@@ -65,9 +69,13 @@
   let apiBase = '/api/v1';
   let metricsPath = '/metrics';
   let authEnabled = false;
+  let apiKey = sessionStorage.getItem('stremdbcApiKey') || '';
+  $('apiKey').value = apiKey;
 
   async function json(url) {
-    const res = await fetch(url, {headers:{Accept:'application/json'}, cache:'no-store'});
+    const headers = {Accept:'application/json'};
+    if (apiKey) headers['X-API-Key'] = apiKey;
+    const res = await fetch(url, {headers, cache:'no-store'});
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return res.json();
   }
@@ -123,6 +131,15 @@
     }
   }
 
+  $('saveApiKey').addEventListener('click', () => {
+    apiKey = $('apiKey').value.trim();
+    if (apiKey) sessionStorage.setItem('stremdbcApiKey', apiKey);
+    else sessionStorage.removeItem('stremdbcApiKey');
+    refresh();
+  });
+  $('apiKey').addEventListener('keydown', event => {
+    if (event.key === 'Enter') $('saveApiKey').click();
+  });
   $('refresh').addEventListener('click', refresh);
   refresh(); setInterval(refresh, 5000);
 })();
