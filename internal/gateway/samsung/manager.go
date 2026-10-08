@@ -50,6 +50,7 @@ type commandRunner struct{}
 type commandProcess struct {
 	cmd         *exec.Cmd
 	stdinWriter *os.File
+	treeGuard   processTreeGuard
 	// stderrBuf keeps only the tail of FFmpeg diagnostics so a chatty child
 	// cannot grow manager memory without bound over long runs.
 	stderrBuf *tailBuffer
@@ -83,12 +84,24 @@ func (commandRunner) Start(ctx context.Context, executable string, args []string
 		return nil, err
 	}
 	_ = stdinReader.Close()
-	return &commandProcess{cmd: cmd, stdinWriter: stdinWriter, stderrBuf: stderrBuf}, nil
+	treeGuard, err := newProcessTreeGuard(cmd.Process)
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		_ = stdinWriter.Close()
+		return nil, fmt.Errorf("manage FFmpeg process lifetime: %w", err)
+	}
+	return &commandProcess{cmd: cmd, stdinWriter: stdinWriter, treeGuard: treeGuard, stderrBuf: stderrBuf}, nil
 }
 
 func (p *commandProcess) Wait() error {
 	err := p.cmd.Wait()
 	_ = p.stdinWriter.Close()
+	if p.treeGuard != nil {
+		if closeErr := p.treeGuard.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}
 	return err
 }
 
