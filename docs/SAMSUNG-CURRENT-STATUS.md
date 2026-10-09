@@ -1,7 +1,7 @@
 # Samsung TV Wall: Current Status and Next Actions
 
 - **Snapshot:** 2026-10-09
-- **Working branch:** `fix/client-close-exit-status`
+- **Working branch:** `fix/samsung-live-browser-diagnostics`
 - **Distribution state:** workspace changes are not rebuilt into the installed Windows Control Panel.
 
 This is the operational source of truth for the five-TV Samsung F5500 work.
@@ -69,6 +69,8 @@ not report browser playback state.
 - Capture the page's actual `error`/`stalled` state and inspect the served
   playlist, segment MIME type, codecs and segment continuity. Do not infer the
   failure from a SOAP acknowledgement or an advancing playlist.
+- The `/tv/` page now emits bounded diagnostic beacons to `/tv/ping` for `page-loaded`, `loadstart`, `loadedmetadata`, `canplay`, `playing`, `waiting`, `error`, `stalled`, and retry events. Inspect StreamDBC logs for `Samsung TV browser event` records and the client IP to distinguish page reachability from decode failure.
+- Live retries now cache-bust the HLS playlist URL so an old Samsung browser cannot remain pinned to a stale manifest URL while the gateway advances.
 - Do not repeat a command when a TV gives no SOAP response; first inspect the
   screen and current state.
 
