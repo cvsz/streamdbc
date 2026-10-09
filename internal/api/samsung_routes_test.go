@@ -63,6 +63,13 @@ func TestTVPingIsOpenProbe(t *testing.T) {
 			t.Fatalf("GET %s content-type = %q", path, contentType)
 		}
 	}
+	eventReq := httptest.NewRequest(http.MethodGet, "/tv/ping?event=playing&detail=readyState%3D4", nil)
+	eventRes := httptest.NewRecorder()
+	server.Handler().ServeHTTP(eventRes, eventReq)
+	if eventRes.Code != http.StatusOK || strings.TrimSpace(eventRes.Body.String()) != "pong" {
+		t.Fatalf("diagnostic GET /tv/ping returned %d %q", eventRes.Code, eventRes.Body.String())
+	}
+
 	req := httptest.NewRequest(http.MethodPost, "/tv/ping", nil)
 	res := httptest.NewRecorder()
 	server.Handler().ServeHTTP(res, req)
