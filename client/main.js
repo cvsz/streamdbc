@@ -9,7 +9,7 @@ const os = require('os');
 const { discoverFleetDetailed, getTVState, hydrateKnownDescription, runTVAction } = require('./samsung-fleet');
 const { applyProbeResults, mergeKnownAndDiscovered, probeKnownFleet, validateLanMediaUrl } = require('./samsung-fleet-inventory');
 const { runHlsSmokeTest } = require('./hls-smoke');
-const { createBeforeQuitHandler, handleWindowClose, handleWindowAllClosed, terminateManagedProcessTree } = require('./window-lifecycle');
+const { createBeforeQuitHandler, handleWindowClose, handleWindowAllClosed, terminateManagedProcessTree, getUnexpectedManagedProcessExitError } = require('./window-lifecycle');
 
 const electronSessionRoot = path.join(os.tmpdir(), 'StreamDBC', 'electron-session');
 try {
@@ -570,7 +570,7 @@ async function startServerRuntime() {
   serverRuntimeLastError = '';
   const ffmpeg = resolveFFmpegRuntime();
   if (!ffmpeg) return { ok: false, error: 'FFmpeg was not found. Reinstall the Control Panel or run the FFmpeg preparation step.' };
-  serverProcess = spawn(runtime.executable, ['-config', runtime.config], {
+  const managedProcess = spawn(runtime.executable, ['-config', runtime.config], {
     cwd: runtime.cwd,
     windowsHide: true,
     detached: false,
@@ -583,15 +583,16 @@ async function startServerRuntime() {
       PATH: `${path.dirname(ffmpeg.path)}${path.delimiter}${process.env.PATH || ''}`
     }
   });
-  serverProcess.once('error', (err) => {
+  serverProcess = managedProcess;
+  managedProcess.once('error', (err) => {
     serverRuntimeLastError = err.message;
-    serverProcess = null;
+    if (serverProcess === managedProcess) serverProcess = null;
     updateTrayMenu();
   });
-  serverProcess.once('exit', (code, signal) => {
-    if (code && code !== 0) serverRuntimeLastError = `stremdbc.exe exited with code ${code}`;
-    if (signal) serverRuntimeLastError = `stremdbc.exe exited after signal ${signal}`;
-    serverProcess = null;
+  managedProcess.once('exit', (code, signal) => {
+    const exitError = getUnexpectedManagedProcessExitError(managedProcess, code, signal);
+    if (exitError) serverRuntimeLastError = exitError;
+    if (serverProcess === managedProcess) serverProcess = null;
     updateTrayMenu();
   });
 
