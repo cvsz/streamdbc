@@ -1,6 +1,6 @@
 module github.com/cvsz/stremdbc
 
-go 1.27.0
+go 1.27.2
 
 require (
 	github.com/gin-gonic/gin v1.12.0
@@ -64,7 +64,7 @@ require (
 	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
