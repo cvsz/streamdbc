@@ -1,6 +1,6 @@
 module github.com/cvsz/stremdbc
 
-go 1.27.2
+go 1.27.0
 
 require (
 	github.com/gin-gonic/gin v1.12.0
