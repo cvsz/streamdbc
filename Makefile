@@ -6,7 +6,7 @@ GORUN := $(GOCMD) run
 GOTEST := $(GOCMD) test
 GOMOD := $(GOCMD) mod
 STATICCHECK_VERSION ?= v0.8.1
-STATICCHECK := $(GORUN) honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+STATICCHECK := GOTOOLCHAIN=go1.27.1 $(GORUN) honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
 GOSEC_VERSION ?= v2.29.0
 GOSEC := $(GORUN) github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
 BINARY_NAME ?= stremdbc
