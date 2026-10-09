@@ -114,6 +114,8 @@ test('probe results mark only known devices online when an allowed port responds
 });
 
 test('media URLs are restricted to the detected PC LAN address and StreamDBC TV paths', () => {
+  assert.equal(validateLanMediaUrl('http://192.168.1.85:8081/tv/', ['192.168.1.85']), 'http://192.168.1.85:8081/tv/');
+  assert.equal(validateLanMediaUrl('http://192.168.1.85:8081/tv/test.mp4', ['192.168.1.85']), 'http://192.168.1.85:8081/tv/test.mp4');
   assert.equal(
     validateLanMediaUrl('http://192.168.1.85:8081/tv/live/index.m3u8', ['192.168.1.85']),
     'http://192.168.1.85:8081/tv/live/index.m3u8'

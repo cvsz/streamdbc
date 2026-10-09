@@ -274,11 +274,12 @@
             <div class="settings-form">
               <div class="form-group">
                 <label for="fleetMediaUrl">Media URL</label>
-                <input type="url" id="fleetMediaUrl" placeholder="http://192.168.1.85:8081/tv/live/index.m3u8">
-                <span class="hint">The TV fetches this HTTP(S) media URL after SetAVTransportURI.</span>
+                <input type="url" id="fleetMediaUrl" placeholder="http://&lt;PC-LAN-IP&gt;:8081/tv/test.mp4">
+                <span class="hint">Play URL uses AVTransport for compatible media such as MP4. Start Samsung Mode tests MP4, then opens the live TV page in the browser.</span>
               </div>
               <div class="button-grid">
                 <button class="btn btn-primary" id="fleetPlayAllBtn">Play URL on All</button>
+                <button class="btn" id="fleetSwitchHdmiAllBtn">Switch All to HDMI</button>
                 <button class="btn" id="fleetStopAllBtn">Stop All</button>
                 <button class="btn" id="fleetMuteAllBtn">Mute All</button>
                 <button class="btn" id="fleetUnmuteAllBtn">Unmute All</button>
@@ -304,6 +305,7 @@
                     <th>Online</th>
                     <th>AVTransport</th>
                     <th>Transport</th>
+                    <th>Input</th>
                     <th>Last Error</th>
                     <th>Volume</th>
                     <th>Mute</th>
@@ -311,7 +313,7 @@
                   </tr>
                 </thead>
                 <tbody id="samsungFleetBody">
-                  <tr><td colspan="10" class="empty">Click Discover TVs.</td></tr>
+                  <tr><td colspan="11" class="empty">Click Discover TVs.</td></tr>
                 </tbody>
               </table>
             </div>

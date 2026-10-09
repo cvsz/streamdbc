@@ -1,6 +1,6 @@
 {
   "name": "stremdbc-client",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "StreamDBC single Windows Control Panel with bundled FFmpeg, Samsung F5500 fleet discovery/control, System Tray, gateway operations, and Cloudflare LAN DNS sync",
   "main": "main.js",
   "scripts": {

@@ -32,6 +32,32 @@ Do not spend time building a Samsung Legacy Smart TV application unless every br
 
 The shortest reliable architecture is the priority.
 
+## Current execution checkpoint — 2026-10-09
+
+Read [`docs/SAMSUNG-CURRENT-STATUS.md`](docs/SAMSUNG-CURRENT-STATUS.md) before
+resuming. It supersedes older branch, port, build and hardware-status
+assumptions in this historical implementation prompt.
+
+- The current checkout is on `fix/client-close-exit-status` with pre-existing
+  uncommitted work. Preserve it; do not reset or switch branches.
+- The Samsung profile serves `/tv/` and HLS on HTTP port 8081. This checkout's
+  Samsung source is DirectShow `vMix Video` + `vMix Audio`; RTMP media ingest
+  on port 1935 is not implemented here.
+- The server reported a live, advancing HLS playlist and HTTP 200 for a current
+  segment. Five TVs accepted the MP4 URI/Play command; the operator confirmed
+  MP4 picture and sound on all five.
+- Five `RunBrowser` commands were acknowledged, but the operator reported the
+  Live Browser page as `Offline`. Live browser HLS video/audio remain
+  unresolved.
+- All five TVs returned HDMI source read-back (TV-81/82/89/91 HDMI1; TV-90
+  HDMI2). The operator previously confirmed an HDMI picture on all five.
+- The reported tray shutdown exception has a source fix in the workspace. The
+  Windows app has not been rebuilt or runtime-verified with that fix.
+
+Continue with the ordered actions in the status file: rebuild and verify the
+close fix on Windows, diagnose the browser's `Offline` result on one TV, prove
+live video/audio, then repeat across the fleet and complete soak/recovery work.
+
 ---
 
 # 0. FINAL TARGET ARCHITECTURE
@@ -65,19 +91,19 @@ Fullscreen live video
 Preferred playback URL:
 
 ```text
-http://<WINDOWS-PC-LAN-IP>:8080/tv
+http://<WINDOWS-PC-LAN-IP>:8081/tv
 ```
 
 Direct HLS fallback:
 
 ```text
-http://<WINDOWS-PC-LAN-IP>:8080/tv/live/index.m3u8
+http://<WINDOWS-PC-LAN-IP>:8081/tv/live/index.m3u8
 ```
 
 Example:
 
 ```text
-http://192.168.1.50:8080/tv
+http://192.168.1.50:8081/tv
 ```
 
 This implementation should not depend on NDI support inside the television.
@@ -229,7 +255,7 @@ Initial target:
 ```text
 1280x720
 30 fps
-H.264 Main profile
+H.264 Baseline profile
 level 3.1
 AAC-LC stereo
 48 kHz
@@ -336,35 +362,28 @@ For Windows DirectShow baseline, generate equivalent behavior to:
 
 ```powershell
 ffmpeg `
+  -hide_banner -loglevel warning `
+  -rtbufsize 64M `
   -f dshow `
   -video_size 1280x720 `
-  -framerate 30 `
   -i video="vMix Video":audio="vMix Audio" `
-  -c:v libx264 `
-  -preset veryfast `
-  -profile:v main `
-  -level:v 3.1 `
-  -pix_fmt yuv420p `
-  -r 30 `
-  -g 60 `
-  -keyint_min 60 `
-  -sc_threshold 0 `
-  -b:v 3500k `
-  -maxrate 4000k `
-  -bufsize 7000k `
-  -c:a aac `
-  -profile:a aac_low `
-  -b:a 128k `
-  -ar 48000 `
-  -ac 2 `
-  -f hls `
-  -hls_time 2 `
-  -hls_list_size 6 `
-  -hls_flags delete_segments+append_list+independent_segments `
+  -map 0:v:0 -map 0:a:0 `
+  -c:v libx264 -preset veryfast -profile:v baseline -level:v 3.1 `
+  -pix_fmt yuv420p -r 30 -g 60 -keyint_min 60 -sc_threshold 0 `
+  -force_key_frames "expr:gte(t,n_forced*2)" `
+  -b:v 3500000 -maxrate 4000000 -bufsize 7000000 `
+  -c:a aac -profile:a aac_low -b:a 128000 -ar 48000 -ac 2 `
+  -f hls -hls_time 2 -hls_list_size 6 -hls_delete_threshold 2 `
+  -hls_flags delete_segments+temp_file `
   -hls_segment_type mpegts `
   -hls_segment_filename ".../segment_%06d.ts" `
   ".../index.m3u8"
 ```
+
+Do not force a DirectShow input `-framerate`: the observed vMix device must
+negotiate its native input rate. `-r 30` is an output encoder setting. Do not
+add `independent_segments`; it raises the playlist version beyond the legacy
+F5500 target.
 
 Verify exact options against installed FFmpeg.
 
@@ -626,7 +645,7 @@ vMix running
 DirectShow device list
 vMix Video found
 vMix Audio found
-port 8080 availability
+port 8081 availability
 firewall accessibility
 HLS output directory writable
 ```
@@ -648,13 +667,13 @@ Should:
 ```text
 Open this on Samsung TV:
 
-http://192.168.x.x:8080/tv
+http://192.168.x.x:8081/tv
 ```
 
 Also print fallback:
 
 ```text
-http://192.168.x.x:8080/tv/live/index.m3u8
+http://192.168.x.x:8081/tv/live/index.m3u8
 ```
 
 ## `samsung-tv-stop.ps1`
@@ -683,7 +702,7 @@ Do not broadly disable Windows Firewall.
 Provide scoped helper/instruction to allow only:
 
 ```text
-TCP 8080
+TCP 8081
 Private network profile
 ```
 
@@ -708,7 +727,7 @@ vMix PC and Samsung TV must be on the same LAN/subnet
 AP/client isolation must be disabled
 TV must be able to reach PC LAN IP
 Windows network profile should be Private
-TCP 8080 must be reachable
+TCP 8081 must be reachable
 ```
 
 Add Windows test:
@@ -805,7 +824,7 @@ Baseline:
 Video:
 H.264/AVC
 yuv420p
-Main profile
+Baseline profile
 Level 3.1
 1280x720
 30fps
@@ -1027,7 +1046,7 @@ Example intent:
 ```yaml
 server:
   host: "0.0.0.0"
-  http_port: 8080
+  http_port: 8081
 
 api:
   enable: true
@@ -1286,7 +1305,7 @@ TV and PC on same Wi-Fi.
 On TV browser open:
 
 ```text
-http://<PC-LAN-IP>:8080/tv
+http://<PC-LAN-IP>:8081/tv
 ```
 
 Success requires:
@@ -1329,7 +1348,7 @@ If `/tv` page loads but video does not:
 Try direct:
 
 ```text
-http://<PC-IP>:8080/tv/live/index.m3u8
+http://<PC-IP>:8081/tv/live/index.m3u8
 ```
 
 If still no playback:
@@ -1339,7 +1358,7 @@ reduce to:
 ```text
 720p
 25/30fps
-H.264 Baseline/Main
+H.264 Baseline
 AAC-LC
 2 Mbps
 ```

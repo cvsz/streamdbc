@@ -26,7 +26,7 @@ func TestBuildArgsUsesSamsungDirectShowHLSBaseline(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"dshow", "1280x720", "video=vMix Video:audio=vMix Audio",
-		"libx264", "main", "3.1", "yuv420p", "30", "60", "3500000", "4000000", "7000000",
+		"libx264", "baseline", "3.1", "yuv420p", "30", "60", "3500000", "4000000", "7000000",
 		"aac", "aac_low", "48000", "mpegts", "delete_segments+temp_file",
 	} {
 		if !slices.Contains(args, expected) {

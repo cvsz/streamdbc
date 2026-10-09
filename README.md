@@ -22,9 +22,9 @@ DirectShow devices to H.264/AAC MPEG-TS HLS.
 | WHIP/WHEP | SDP peer negotiation and publisher-track detection; RTP forwarding is unavailable |
 | RTMP/RTSP outputs | Bounded consumer/control endpoints; no outbound media writer |
 | Recorder, DVR, transcoder | Reusable managers; no executable API/media-source wiring |
-| Samsung F5500 gateway | vMix DirectShow capture, H.264/AAC HLS, legacy `/tv` pages; physical decode/soak validation remains a device gate |
-| Windows Single Control Panel | v1.4.0: server + FFmpeg + gateway + LAN/Cloudflare + SSDP Samsung fleet discovery/control |
-| Samsung fleet control | Discovery-driven UPnP AVTransport/RenderingControl; Play URL, Stop, Volume, Mute, Play All/Stop All; no hard-coded `/smp_*` endpoints |
+| Samsung F5500 gateway | vMix DirectShow capture, H.264/AAC HLS, legacy `/tv` pages; live browser playback is not yet physically verified |
+| Windows Single Control Panel | Latest documented release is v1.4.0; working tree targets v1.4.1 and is not rebuilt with current changes |
+| Samsung fleet control | Workspace includes discovery-driven AVTransport/RenderingControl, RunBrowser and connected-HDMI selection with read-back; live browser currently reports Offline |
 | Redis cluster | Redis node registration, heartbeat, discovery, and selection primitives |
 | PostgreSQL | Configuration is rejected until schema integration is implemented |
 
@@ -95,18 +95,23 @@ The television does not consume NDI directly.
 vMix / NDI sources
       ↓
      vMix
-      ↓ External Output / RTMP source
+      ↓ External Output → DirectShow devices
 StreamDBC + FFmpeg
       ↓ HTTP media
 Windows Single Control Panel
-      ↓ SSDP + UPnP AVTransport
+      ↓ SSDP + UPnP fleet control / RunBrowser
 Samsung UA40F5500 fleet
 ```
 
 The current Samsung profile remains 1280x720 at 30 fps, H.264/AAC, with
-two-second MPEG-TS HLS segments. Browser playback remains available at
-`/tv/`, but AVTransport is the preferred fleet-control path when the TV accepts
-the selected media URL.
+two-second MPEG-TS HLS segments. AVTransport accepted the MP4 baseline, but
+the HLS URI was rejected with `Illegal MIME-type`; the current live path uses
+the TV browser at `/tv/` and still reports `Offline`. In this checkout, RTMP
+port 1935 is not a media-ingest path.
+
+Current physical and software evidence, including the Offline browser result
+and ordered next actions, is tracked in
+[`docs/SAMSUNG-CURRENT-STATUS.md`](docs/SAMSUNG-CURRENT-STATUS.md).
 
 The Control Panel does **not** hard-code `/smp_*` paths. Samsung Y2013 firmware
 can expose different endpoint numbers on different TVs and after reboot. The
@@ -121,17 +126,20 @@ Current Control Panel actions:
 - Discover TVs
 - Refresh transport/volume/mute state
 - Play one media URL on one TV
+- Switch one TV or all known TVs to a connected HDMI input
+- Start Samsung Mode (MP4 baseline, then launch the live browser page)
 - Stop one TV
 - Set volume
 - Mute/unmute
 - Play All / Stop All
 - Mute All / Unmute All
 
-Samsung-specific `MainTVAgent2` is discovered and recorded but remains
-secondary because real firmware may return UPnP `501 Action Failed` for actions
-such as `RunBrowser`.
+Samsung-specific `MainTVAgent2` is discovered and capability-gated. A SOAP
+acknowledgement from `RunBrowser` confirms only that the command was accepted;
+it does not confirm that the legacy browser fetched or decoded HLS. The current
+browser result and remaining hardware checks are recorded in the status file.
 
-On Windows, the v1.4.0 Control Panel also manages the StreamDBC server runtime,
+On Windows, the Control Panel also manages the StreamDBC server runtime,
 bundled FFmpeg, gateway operations, Windows Doctor/builder tasks, and LAN /
 Cloudflare DNS status from the same Samsung TV view.
 

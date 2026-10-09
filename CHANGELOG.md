@@ -2,6 +2,32 @@
 
 All notable StreamDBC changes are recorded here.
 
+## Unreleased — 2026-10-09
+
+### Added
+
+- Samsung fleet controls in the workspace can open the live TV browser and
+  switch known TVs to a connected HDMI input using Samsung source discovery and
+  read-back verification.
+- Added a current Samsung hardware status and ordered follow-up checklist in
+  `docs/SAMSUNG-CURRENT-STATUS.md`.
+
+### Fixed
+
+- Guard Control Panel tray-menu updates during shutdown after the tray has been
+  destroyed while the managed server process is exiting.
+
+### Validation and release state
+
+- All five TVs returned HDMI input read-back; the operator previously confirmed
+  HDMI picture on all five. MP4 picture and audio were confirmed on all five.
+- The live browser still reports `Offline` despite an advancing HLS playlist
+  and five acknowledged `RunBrowser` commands.
+- Sending the HLS playlist through AVTransport returned `Illegal MIME-type`
+  on all five TVs; the MP4 and browser paths are separate.
+- These workspace changes have not been packaged or installed. The close fix
+  still needs a native Windows rebuild and runtime verification.
+
 ## 1.4.0 — 2026-10-08
 
 ### Added
