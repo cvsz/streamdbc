@@ -310,11 +310,29 @@ func (s *Server) SetSamsungTV(manager *samsung.Manager, cfg config.SamsungTVConf
 	s.registerRoute(s.basePath+"/tv/status", statusHandler)
 	s.registerRoute("/tv/status", statusHandler)
 	// /tv/ping is a connectivity probe for the TV's weak scripting
-	// environment (plain-text, no auth, like /health).
+	// environment (plain-text, no auth, like /health). Optional event/detail
+	// query parameters are accepted only for bounded playback diagnostics.
 	pingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			s.methodNotAllowed(w)
 			return
+		}
+		if r.Method == http.MethodGet {
+			eventName := strings.TrimSpace(r.URL.Query().Get("event"))
+			detail := strings.TrimSpace(r.URL.Query().Get("detail"))
+			if eventName != "" {
+				if len(eventName) > 64 {
+					eventName = eventName[:64]
+				}
+				if len(detail) > 256 {
+					detail = detail[:256]
+				}
+				s.logger.Info("Samsung TV browser event",
+					zap.String("client_ip", logSafeValue(s.clientIP(r))),
+					zap.String("event", logSafeValue(eventName)),
+					zap.String("detail", logSafeValue(detail)),
+				)
+			}
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
