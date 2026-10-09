@@ -1,7 +1,7 @@
 # STREMDBC User Manual
 
 **Version:** 1.4.0
-**Last Updated:** 2026-10-08
+**Last Updated:** 2026-10-09
 
 ---
 
@@ -54,8 +54,8 @@ STREMDBC is a Go-based streaming management control plane. It provides:
 | Recorder, DVR, transcoder | Reusable managers; no media-source wiring |
 | Redis cluster | Node registration, heartbeat, discovery primitives |
 | PostgreSQL | Rejected until schema integration |
-| Windows Single Control Panel | v1.4.0 available; packages server runtime, FFmpeg and Samsung fleet controls |
-| Samsung UA40F5500 fleet control | SSDP discovery + AVTransport/RenderingControl; physical playback validation remains required |
+| Windows Single Control Panel | Latest documented release v1.4.0; workspace targets v1.4.1 and is not rebuilt with current changes |
+| Samsung UA40F5500 fleet control | SSDP, AVTransport/RenderingControl, RunBrowser and verified HDMI source selection; live browser playback remains unresolved |
 
 > **Important:** The default configuration keeps all media adapters disabled. Enable an adapter only after supplying the corresponding production media engine and integration.
 
@@ -1134,7 +1134,8 @@ tail -f /tmp/stremdbc.log
 ## 17. Windows Single Control Panel
 
 The Windows desktop application is the preferred operator surface for the
-Samsung deployment. Version 1.4.0 combines these operations in one UI:
+Samsung deployment. The latest documented release is v1.4.0; the current
+workspace targets v1.4.1, which has not been rebuilt or installed:
 
 - StreamDBC server start/restart/stop and runtime status
 - bundled FFmpeg path/version/capability verification
@@ -1143,6 +1144,8 @@ Samsung deployment. Version 1.4.0 combines these operations in one UI:
 - LAN address detection
 - Cloudflare LAN-DNS synchronization
 - Samsung TV fleet discovery and control
+- Start Samsung Mode (MP4 baseline, then open the live browser page)
+- switch one or all known TVs to a connected HDMI input with read-back
 
 The installer contains `samsung-fleet.js`; no external Node package is needed
 for SSDP/UPnP control.
@@ -1197,6 +1200,8 @@ The Control Panel currently exposes:
 - Stop per TV
 - Set volume
 - Mute/unmute
+- switch one or all known TVs to a connected HDMI input
+- Start Samsung Mode, which tests MP4 before launching `/tv/` in the browser
 - Play All / Stop All
 - Mute All / Unmute All
 
@@ -1221,3 +1226,14 @@ Before calling a deployment production-ready:
 
 `MainTVAgent2` is optional/fallback. The action can exist in SCPD while the
 firmware still returns UPnP 501 at runtime.
+
+Current hardware report: the operator confirmed MP4 picture/audio and HDMI
+picture on all five TVs. The latest HDMI command read back HDMI1 on TV-81/82/89/91
+and HDMI2 on TV-90. Live Browser was reported as `Offline` despite five
+acknowledged browser-launch commands, so live HLS video/audio remain
+unconfirmed. See [`SAMSUNG-CURRENT-STATUS.md`](SAMSUNG-CURRENT-STATUS.md) for
+the evidence limits and ordered next actions.
+
+An earlier attempt to set the HLS playlist through AVTransport returned
+`Illegal MIME-type` on all five TVs. Do not confuse that result with MP4
+playback or the separate browser/HLS path.

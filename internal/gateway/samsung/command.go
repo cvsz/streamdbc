@@ -54,7 +54,7 @@ func BuildArgs(cfg config.SamsungTVConfig) ([]string, error) {
 	args = append(args,
 		"-c:v", "libx264",
 		"-preset", "veryfast",
-		"-profile:v", "main",
+		"-profile:v", "baseline",
 		"-level:v", level,
 		"-pix_fmt", "yuv420p",
 		"-r", strconv.Itoa(cfg.FrameRate),

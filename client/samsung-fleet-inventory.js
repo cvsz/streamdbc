@@ -14,7 +14,8 @@ const ALLOWED_TV_PORTS = Object.freeze([80, 443, 4443, 6000, 7676, 52345, 55000,
 const ALLOWED_PORT_SET = new Set(ALLOWED_TV_PORTS);
 const CAPABILITY_NAMES = Object.freeze([
   'mediaRenderer', 'avTransport', 'renderingControl', 'connectionManager', 'mainTVAgent2',
-  'setAVTransportURI', 'play', 'stop', 'pause', 'runBrowser'
+  'setAVTransportURI', 'play', 'stop', 'pause', 'runBrowser',
+  'getSourceList', 'getCurrentExternalSource', 'setMainTVSource'
 ]);
 
 function isPrivateIPv4(value) {
@@ -69,7 +70,7 @@ function validateLanMediaUrl(value, localIPs) {
   try { url = new URL(String(value || '')); } catch { throw new Error('Media URL is invalid'); }
   const hosts = new Set((Array.isArray(localIPs) ? localIPs : []).filter(isPrivateIPv4));
   if (url.protocol !== 'http:' || url.username || url.password || !hosts.has(url.hostname) || Number(url.port || 80) !== 8081 || !url.pathname.startsWith('/tv/')) {
-    throw new Error('Media URL must use this PC LAN IPv4, port 8081, and a /tv/ path');
+    throw new Error('TV URL must use this PC LAN IPv4, port 8081, and a /tv/ path');
   }
   return url.toString();
 }

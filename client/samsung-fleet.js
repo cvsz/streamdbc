@@ -157,7 +157,10 @@ async function hydrateDescription(ip, location, ssdp) {
       play: Boolean(byType(SERVICE.av)?.actions.includes('Play')),
       stop: Boolean(byType(SERVICE.av)?.actions.includes('Stop')),
       pause: Boolean(byType(SERVICE.av)?.actions.includes('Pause')),
-      runBrowser: Boolean(byType(SERVICE.mainTv)?.actions.includes('RunBrowser'))
+      runBrowser: Boolean(byType(SERVICE.mainTv)?.actions.includes('RunBrowser')),
+      getSourceList: Boolean(byType(SERVICE.mainTv)?.actions.includes('GetSourceList')),
+      getCurrentExternalSource: Boolean(byType(SERVICE.mainTv)?.actions.includes('GetCurrentExternalSource')),
+      setMainTVSource: Boolean(byType(SERVICE.mainTv)?.actions.includes('SetMainTVSource'))
     }
   };
 }
@@ -279,7 +282,10 @@ async function discoverFleetDetailed(localIP, timeoutMs = 4500) {
         play: Boolean(byType(SERVICE.av)?.actions.includes('Play')),
         stop: Boolean(byType(SERVICE.av)?.actions.includes('Stop')),
         pause: Boolean(byType(SERVICE.av)?.actions.includes('Pause')),
-        runBrowser: Boolean(byType(SERVICE.mainTv)?.actions.includes('RunBrowser'))
+        runBrowser: Boolean(byType(SERVICE.mainTv)?.actions.includes('RunBrowser')),
+        getSourceList: Boolean(byType(SERVICE.mainTv)?.actions.includes('GetSourceList')),
+        getCurrentExternalSource: Boolean(byType(SERVICE.mainTv)?.actions.includes('GetCurrentExternalSource')),
+        setMainTVSource: Boolean(byType(SERVICE.mainTv)?.actions.includes('SetMainTVSource'))
       }
     });
   }
@@ -361,7 +367,7 @@ function soapRequest(tv, serviceType, action, args = {}, timeoutMs = 5000) {
 }
 
 async function getTVState(tv) {
-  const result = { ip: tv.ip, transport: '', volume: null, muted: null, errors: [] };
+  const result = { ip: tv.ip, transport: '', source: '', volume: null, muted: null, errors: [] };
   const av = serviceFor(tv, SERVICE.av);
   if (av?.actions.includes('GetTransportInfo')) {
     const r = await soapRequest(tv, SERVICE.av, 'GetTransportInfo', { InstanceID: 0 });
@@ -379,7 +385,67 @@ async function getTVState(tv) {
     if (r.ok) result.muted = tag(r.body, 'CurrentMute') === '1';
     else result.errors.push('mute:' + (r.errorCode || r.error || r.statusCode));
   }
+  const mainTv = serviceFor(tv, SERVICE.mainTv);
+  if (mainTv?.actions.includes('GetCurrentExternalSource')) {
+    const r = await soapRequest(tv, SERVICE.mainTv, 'GetCurrentExternalSource', {});
+    const sourceResult = tag(r.body, 'Result');
+    if (r.ok && sourceResult === 'OK') {
+      result.source = tag(r.body, 'CurrentExternalSource');
+    } else if (sourceResult !== 'NOTOK_OtherMode') {
+      result.errors.push('source:' + (sourceResult || r.errorCode || r.error || r.statusCode));
+    }
+  }
   return result;
+}
+
+function parseSamsungSourceList(xml) {
+  const sourceListXml = tag(xml, 'SourceList');
+  const uiId = tag(sourceListXml, 'ID');
+  const sources = (sourceListXml.match(/<Source(?:\s[^>]*)?>[\s\S]*?<\/Source>/gi) || []).map((source) => ({
+    type: tag(source, 'SourceType'),
+    id: tag(source, 'ID'),
+    connected: /^(?:yes|true|1)$/i.test(tag(source, 'Connected'))
+  }));
+  return { uiId, sources };
+}
+
+async function switchToConnectedHdmi(tv, request) {
+  const list = await request(tv, SERVICE.mainTv, 'GetSourceList', {});
+  const listResult = tag(list.body, 'Result');
+  if (!list.ok || listResult !== 'OK') {
+    return { ...list, ok: false, phase: 'SOURCE_LIST_FAILED', errorDescription: listResult || list.errorDescription || list.error || 'GetSourceList failed' };
+  }
+
+  const sourceList = parseSamsungSourceList(list.body);
+  const hdmi = sourceList.sources.find((source) => source.connected && /^HDMI/i.test(source.type));
+  if (!sourceList.uiId || !hdmi?.id) {
+    return { ok: false, phase: 'NO_CONNECTED_HDMI', error: 'TV reported no connected HDMI input.' };
+  }
+
+  const set = await request(tv, SERVICE.mainTv, 'SetMainTVSource', {
+    Source: hdmi.type,
+    ID: hdmi.id,
+    UiID: sourceList.uiId
+  });
+  const setResult = tag(set.body, 'Result');
+  if (!set.ok || setResult !== 'OK') {
+    return { ...set, ok: false, phase: 'SOURCE_SET_FAILED', source: hdmi, errorDescription: setResult || set.errorDescription || set.error || 'SetMainTVSource failed' };
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const readback = await request(tv, SERVICE.mainTv, 'GetCurrentExternalSource', {});
+  const currentSource = tag(readback.body, 'CurrentExternalSource');
+  const currentId = tag(readback.body, 'ID');
+  const verified = readback.ok && tag(readback.body, 'Result') === 'OK' &&
+    currentSource === hdmi.type && currentId === hdmi.id;
+  return {
+    ...set,
+    ok: verified,
+    phase: verified ? 'SOURCE_CONFIRMED' : 'SOURCE_UNVERIFIED',
+    source: hdmi,
+    verification: { ok: readback.ok, result: tag(readback.body, 'Result'), source: currentSource, id: currentId },
+    error: verified ? undefined : 'TV accepted the input command but source read-back did not confirm it.'
+  };
 }
 
 async function runTVAction(tv, action, value, request = soapRequest) {
@@ -388,6 +454,10 @@ async function runTVAction(tv, action, value, request = soapRequest) {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       result = await request(tv, serviceType, name, args);
       if (result.ok) return result;
+      const retryableTransportFailure = !result.errorCode && !result.errorDescription &&
+        (result.statusCode === 0 || [502, 503, 504].includes(result.statusCode));
+      if (!retryableTransportFailure || attempt + 1 >= maxAttempts) return result;
+      await new Promise((resolve) => setTimeout(resolve, 250));
     }
     return result;
   };
@@ -400,7 +470,7 @@ async function runTVAction(tv, action, value, request = soapRequest) {
         InstanceID: 0, CurrentURI: u.toString(), CurrentURIMetaData: ''
       }, 2);
       if (!set.ok) return { ...set, phase: 'SET_URI_FAILED', setUri: set };
-      const play = await retryRequest(SERVICE.av, 'Play', { InstanceID: 0, Speed: 1 }, 3);
+      const play = await retryRequest(SERVICE.av, 'Play', { InstanceID: 0, Speed: 1 }, 2);
       return { ...play, phase: play.ok ? 'PLAY_ACCEPTED' : 'PLAY_FAILED', setUri: set };
     }
     case 'play':
@@ -418,8 +488,19 @@ async function runTVAction(tv, action, value, request = soapRequest) {
     }
     case 'open-browser': {
       const u = new URL(String(value || ''));
-      if (!['http:', 'https:'].includes(u.protocol)) throw new Error('Browser URL must be HTTP(S)');
+      if (u.protocol !== 'http:' || !isPrivateIPv4(u.hostname) || Number(u.port || 80) !== 8081 || !u.pathname.startsWith('/tv/')) {
+        throw new Error('Browser URL must use a private LAN IP, port 8081, and a /tv/ path');
+      }
       return request(tv, SERVICE.mainTv, 'RunBrowser', { BrowserURL: u.toString() });
+    }
+    case 'switch-hdmi': {
+      const mainTv = serviceFor(tv, SERVICE.mainTv);
+      if (!mainTv?.actions.includes('GetSourceList') ||
+          !mainTv.actions.includes('SetMainTVSource') ||
+          !mainTv.actions.includes('GetCurrentExternalSource')) {
+        return { ok: false, phase: 'SOURCE_CONTROL_UNSUPPORTED', error: 'Verified source-list, source-select, and source-read-back actions are required.' };
+      }
+      return switchToConnectedHdmi(tv, request);
     }
     default:
       throw new Error('Unsupported Samsung TV action');

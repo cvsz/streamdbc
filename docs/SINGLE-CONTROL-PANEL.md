@@ -1,7 +1,8 @@
 # StreamDBC Windows Single Control Panel
 
-**Version:** 1.4.0  
-**Updated:** 2026-10-08
+**Workspace package target:** 1.4.1 (unreleased; current changes are not built)
+
+**Updated:** 2026-10-09
 
 The Windows Single Control Panel combines StreamDBC server/runtime operations,
 the bundled FFmpeg runtime, Samsung gateway management, LAN/DNS operations and
@@ -51,14 +52,17 @@ before rendering one fleet row.
 Per TV:
 
 - Play URL
+- Switch to connected HDMI input
 - Stop
 - set volume
 - mute/unmute
-- refresh transport/volume/mute state
+- refresh transport/input/volume/mute state
 
 Fleet-wide:
 
 - Play URL on All
+- Switch All to HDMI
+- Start Samsung Mode (MP4 baseline, then open the live browser page per TV)
 - Stop All
 - Mute All
 - Unmute All
@@ -66,6 +70,31 @@ Fleet-wide:
 The primary media-control path is DLNA/UPnP AVTransport. RenderingControl is
 used for volume/mute. Samsung MainTVAgent2 is discovered but treated as
 optional because supported actions may still return UPnP 501 at runtime.
+
+HDMI switching uses `GetSourceList`, `SetMainTVSource` and
+`GetCurrentExternalSource` only when the TV advertises all three actions. The
+controller chooses the first HDMI input reported as connected, uses that TV's
+runtime source IDs, and reports success only when read-back confirms the same
+input. It does not send blind remote-key sequences. The latest operation
+confirmed all five TVs by read-back: TV-81/82/89/91 on HDMI1 and TV-90 on
+HDMI2. The operator previously confirmed an HDMI picture on all five.
+
+## Current workspace status
+
+The MP4 baseline was accepted by all five TVs, and the operator confirmed
+picture and audio on all five. The latest `RunBrowser` command was acknowledged
+by all five, but the operator reported that the Live Browser page showed
+`Offline`. PC-side HLS readiness and a SOAP acknowledgement do not prove TV
+playback. Track the exact per-TV outcome in
+[`SAMSUNG-CURRENT-STATUS.md`](SAMSUNG-CURRENT-STATUS.md).
+
+An earlier attempt to send the HLS playlist through AVTransport failed on all
+five TVs with `Illegal MIME-type`. Keep that result separate from MP4 playback
+and browser playback.
+
+The source also contains a shutdown guard for the reported `Tray is destroyed`
+exception. It has not been rebuilt into the installed Windows app or verified
+at runtime yet.
 
 ## Media URL
 
@@ -123,9 +152,14 @@ checks:
 5. Click **Discover TVs**.
 6. Confirm expected TVs and AVTransport capability.
 7. Enter a reachable media URL.
-8. Use per-TV **Play URL** or **Play URL on All**.
-9. Refresh state and verify `PLAYING`.
-10. Use Stop/Volume/Mute controls as needed.
+8. Use **Start Samsung Mode** to run the MP4 baseline, then open `/tv/` in the
+   TV browser; verify the actual screen and sound.
+9. Use **Switch All to HDMI** when the connected HDMI input is needed, then
+   refresh input state.
+10. Use **Play URL** or **Play URL on All** only for media accepted by the TV.
+11. Refresh state and verify AVTransport state where applicable; browser
+    playback still requires physical observation.
+12. Use Stop/Volume/Mute controls as needed.
 
 ## Current production boundary
 
@@ -144,6 +178,10 @@ Before production sign-off, record evidence for:
 - source loss/recovery;
 - Wi-Fi interruption/recovery;
 - latency and multi-hour soak.
+
+Current status: five-TV HDMI source read-back and MP4 picture/audio are
+confirmed; Live Browser playback is unresolved. The complete evidence table and
+next checklist are in [`SAMSUNG-CURRENT-STATUS.md`](SAMSUNG-CURRENT-STATUS.md).
 
 See also:
 

@@ -74,10 +74,10 @@ management operations API-key protected. See
 
 ## Windows Control Panel Samsung fleet IPC
 
-Samsung fleet discovery/control in v1.4.0 is implemented in the Electron
-Control Panel, not as public HTTP management endpoints. The renderer calls
-preload IPC methods, and the Electron main process owns SSDP/UPnP network
-access.
+Samsung fleet discovery/control is implemented in the Electron Control Panel,
+not as public HTTP management endpoints. The renderer calls preload IPC
+methods, and the Electron main process owns SSDP/UPnP network access. The
+workspace package target is v1.4.1; current changes have not been packaged.
 
 Current IPC capabilities:
 
@@ -85,8 +85,16 @@ Current IPC capabilities:
 - list the current in-memory fleet;
 - refresh AVTransport/RenderingControl state;
 - per-TV Play URL / Play / Pause / Stop;
+- capability-gated per-TV `RunBrowser` for a private-LAN `/tv/` URL;
+- switch a known TV or the known fleet to a connected HDMI input, with Samsung
+  source read-back verification;
 - per-TV volume and mute;
 - Play All / Stop All / Mute All / Unmute All.
+
+The renderer's **Start Samsung Mode** sequence tests an MP4 through
+AVTransport and then launches the live browser page. A successful SOAP reply
+from `RunBrowser` reports command acceptance only. It cannot prove that the TV
+browser fetched or decoded the playlist.
 
 The controller accepts actions only for TVs present in the current
 SSDP-discovered fleet. Device/service URLs must be private IPv4 HTTP URLs and
@@ -97,6 +105,10 @@ These IPC methods are an implementation detail of the Windows application and
 are not part of the stable server REST API. If server-side fleet REST endpoints
 are added later, they require separate authentication, authorization,
 rate-limiting and audit review.
+
+See [`SAMSUNG-CURRENT-STATUS.md`](SAMSUNG-CURRENT-STATUS.md) for the latest
+five-TV evidence, the Live Browser `Offline` result, and the ordered next
+actions.
 
 ## Streams
 

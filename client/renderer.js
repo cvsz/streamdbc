@@ -472,7 +472,7 @@ function renderSamsungFleet() {
   );
 
   if (!samsungFleet.length) {
-    body.innerHTML = '<tr><td colspan="10" class="empty">No Samsung TVs discovered.</td></tr>';
+    body.innerHTML = '<tr><td colspan="11" class="empty">No Samsung TVs discovered.</td></tr>';
     return;
   }
 
@@ -481,6 +481,8 @@ function renderSamsungFleet() {
     const volume = Number.isFinite(state.volume) ? state.volume : 20;
     const muted = state.muted === true;
     const canPlay = tv.online && tv.capabilities?.setAVTransportURI && tv.capabilities?.play;
+    const canSwitchHdmi = tv.known && tv.online && tv.capabilities?.getSourceList &&
+      tv.capabilities?.setMainTVSource && tv.capabilities?.getCurrentExternalSource;
     const lastError = state.errors?.join('; ') || tv.probeError || '';
     return `<tr data-tv-ip="${escapeHtml(tv.ip)}">
       <td><strong>${escapeHtml(tv.friendlyName || 'Samsung TV')}</strong></td>
@@ -489,11 +491,13 @@ function renderSamsungFleet() {
       <td>${tv.online ? 'ONLINE' : 'OFFLINE / UNREACHABLE'}</td>
       <td>${tv.capabilitiesKnown ? (tv.capabilities?.avTransport ? 'AVAILABLE' : 'NOT FOUND') : 'UNKNOWN'}</td>
       <td>${escapeHtml(state.transport || 'UNKNOWN')}</td>
+      <td>${escapeHtml(state.source || '—')}</td>
       <td>${escapeHtml(lastError || '—')}</td>
       <td><input class="fleet-volume" type="number" min="0" max="100" value="${volume}" style="width:72px"></td>
       <td>${muted ? 'Muted' : 'On'}</td>
       <td><div class="actions">
         <button class="btn btn-sm btn-primary" data-fleet-action="play-url" ${canPlay ? '' : 'disabled'}>Play URL</button>
+        <button class="btn btn-sm" data-fleet-action="switch-hdmi" ${canSwitchHdmi ? '' : 'disabled'}>HDMI</button>
         <button class="btn btn-sm" data-fleet-action="stop" ${tv.online && tv.capabilities?.stop ? '' : 'disabled'}>Stop</button>
         <button class="btn btn-sm" data-fleet-action="volume" ${tv.online && tv.capabilities?.renderingControl ? '' : 'disabled'}>Set Vol</button>
         <button class="btn btn-sm" data-fleet-action="${muted ? 'unmute' : 'mute'}" ${tv.online && tv.capabilities?.renderingControl ? '' : 'disabled'}>${muted ? 'Unmute' : 'Mute'}</button>
@@ -511,7 +515,7 @@ async function discoverSamsungFleet() {
     samsungFleet = result.tvs || [];
     samsungFleetState = new Map();
     if ($('fleetMediaUrl') && !$('fleetMediaUrl').value && result.localIP) {
-      $('fleetMediaUrl').value = `http://${result.localIP}:8081/tv/live/index.m3u8`;
+      $('fleetMediaUrl').value = `http://${result.localIP}:8081/tv/test.mp4`;
     }
     renderSamsungFleet();
     const output = $('builderOutput');
@@ -521,7 +525,8 @@ async function discoverSamsungFleet() {
         lines.push(`${diagnostic.interface} ${diagnostic.localIP}: M-SEARCH ${diagnostic.mSearchSent ? 'sent' : 'failed'}, responses ${diagnostic.responses || 0}, hydrated ${diagnostic.hydrated || 0}${diagnostic.descriptionFailures ? `, description failures ${diagnostic.descriptionFailures}` : ''}${diagnostic.error ? `, error ${diagnostic.error}` : ''}`);
       }
       for (const tv of samsungFleet.filter((item) => item.known)) {
-        lines.push(`${tv.friendlyName} ${tv.ip}: ${tv.online ? 'ONLINE' : 'OFFLINE / UNREACHABLE'}; open ports ${tv.openPorts?.join(', ') || 'none'}; AVTransport ${tv.capabilitiesKnown ? (tv.capabilities?.avTransport ? 'verified' : 'not found') : 'unknown'}`);
+        const hdmiActions = tv.capabilities?.getSourceList && tv.capabilities?.setMainTVSource && tv.capabilities?.getCurrentExternalSource;
+        lines.push(`${tv.friendlyName} ${tv.ip}: ${tv.online ? 'ONLINE' : 'OFFLINE / UNREACHABLE'}; open ports ${tv.openPorts?.join(', ') || 'none'}; AVTransport ${tv.capabilitiesKnown ? (tv.capabilities?.avTransport ? 'verified' : 'not found') : 'unknown'}; HDMI source API ${tv.capabilitiesKnown ? (hdmiActions ? 'verified' : 'not found') : 'unknown'}`);
       }
       output.textContent += (output.textContent ? '\n' : '') + lines.join('\n') + '\n';
     }
@@ -555,6 +560,9 @@ async function runSamsungFleetAction(ip, action, value) {
   }
   if (result.state) samsungFleetState.set(ip, result.state);
   renderSamsungFleet();
+  if (action === 'switch-hdmi') {
+    showToast(`${ip}: switched to ${result.source?.type || 'HDMI'} and confirmed`, 'success');
+  }
   return true;
 }
 
@@ -565,12 +573,50 @@ async function runSamsungFleetAll(action, value) {
   }
   const result = await API.samsungFleetActionAll({ action, value });
   const failed = (result?.results || []).filter((item) => !item.ok);
-  if (failed.length) {
+  if (action === 'switch-hdmi') {
+    const confirmed = (result?.results || []).filter((item) => item.ok).length;
+    const total = (result?.results || []).length;
+    showToast(`HDMI confirmed on ${confirmed}/${total} TV(s)`, total > 0 && confirmed === total ? 'success' : 'error');
+  } else if (failed.length) {
     showToast(`${failed.length} TV action(s) failed`, 'error');
   } else {
     showToast(`Applied ${action} to ${(result?.results || []).length} TV(s)`, 'success');
   }
+  if (action === 'switch-hdmi') {
+    const output = $('builderOutput');
+    if (output) {
+      const lines = (result?.results || []).map((item) =>
+        `${item.ip}: ${item.ok ? `HDMI confirmed (${item.source?.type || 'HDMI'})` : `HDMI switch failed; ${item.errorDescription || item.error || item.phase || 'unverified'}`}`
+      );
+      output.textContent += (output.textContent ? '\n' : '') + lines.join('\n') + '\n';
+    }
+  }
   await refreshSamsungFleetState();
+}
+
+async function handleSamsungFleetControlClick(event) {
+  const button = event.target.closest('button[data-fleet-action]');
+  const row = button?.closest('tr[data-tv-ip]');
+  if (!button || !row) return;
+
+  let action = button.dataset.fleetAction;
+  let value;
+  if (action === 'play-url') value = $('fleetMediaUrl')?.value.trim() || '';
+  if (action === 'volume') value = Number(row.querySelector('.fleet-volume')?.value);
+  if (action === 'mute') value = true;
+  if (action === 'unmute') {
+    action = 'mute';
+    value = false;
+  }
+
+  button.disabled = true;
+  try {
+    await runSamsungFleetAction(row.dataset.tvIp, action, value);
+  } catch (error) {
+    showToast(error?.message || 'Samsung TV action failed', 'error');
+  } finally {
+    if (button.isConnected) button.disabled = false;
+  }
 }
 
 async function stopSamsungWall() {
@@ -677,67 +723,88 @@ async function startSamsungMode() {
       log(`${diagnostic.interface} ${diagnostic.localIP}: M-SEARCH ${diagnostic.mSearchSent ? 'sent' : 'failed'}, responses ${diagnostic.responses || 0}, hydrated ${diagnostic.hydrated || 0}${diagnostic.error ? `, error ${diagnostic.error}` : ''}`);
     }
     for (const tv of samsungFleet.filter((item) => item.known)) {
-      log(`${tv.friendlyName} ${tv.ip}: ${tv.online ? 'ONLINE' : 'OFFLINE / UNREACHABLE'}; open ports ${tv.openPorts?.join(', ') || 'none'}; AVTransport ${tv.capabilitiesKnown ? (tv.capabilities?.avTransport ? 'verified' : 'not found') : 'unknown'}`);
+      const hdmiActions = tv.capabilities?.getSourceList && tv.capabilities?.setMainTVSource && tv.capabilities?.getCurrentExternalSource;
+      log(`${tv.friendlyName} ${tv.ip}: ${tv.online ? 'ONLINE' : 'OFFLINE / UNREACHABLE'}; open ports ${tv.openPorts?.join(', ') || 'none'}; AVTransport ${tv.capabilitiesKnown ? (tv.capabilities?.avTransport ? 'verified' : 'not found') : 'unknown'}; RunBrowser ${tv.capabilitiesKnown ? (tv.capabilities?.runBrowser ? 'verified' : 'not found') : 'unknown'}; HDMI source API ${tv.capabilitiesKnown ? (hdmiActions ? 'verified' : 'not found') : 'unknown'}`);
     }
 
     if (!discovered.localIP) throw new Error(discovered.warning || 'No physical private LAN IPv4 address was detected');
 
-    const mediaUrl = `http://${discovered.localIP}:8081/tv/live/index.m3u8`;
+    const mediaUrl = `http://${discovered.localIP}:8081/tv/test.mp4`;
+    const browserUrl = `http://${discovered.localIP}:8081/tv/`;
     if ($('fleetMediaUrl')) $('fleetMediaUrl').value = mediaUrl;
-    const playbackCandidates = samsungFleet.filter((tv) => tv.online && tv.capabilities?.setAVTransportURI && tv.capabilities?.play);
-    const unavailable = samsungFleet.filter((tv) => !tv.online || !tv.capabilities?.setAVTransportURI || !tv.capabilities?.play);
+    const canPlayMedia = (tv) => tv.capabilities?.setAVTransportURI && tv.capabilities?.play;
+    const candidates = samsungFleet.filter((tv) => tv.online && (canPlayMedia(tv) || tv.capabilities?.runBrowser));
+    const unavailable = samsungFleet.filter((tv) => !tv.online || (!canPlayMedia(tv) && !tv.capabilities?.runBrowser));
     for (const tv of unavailable) {
-      const reason = !tv.online ? 'OFFLINE' : 'AVTransport capability not verified';
-      log(`${tv.friendlyName || tv.ip}: ${reason}; playback skipped.`);
+      const reason = !tv.online ? 'OFFLINE' : 'AVTransport and RunBrowser capabilities not verified';
+      log(`${tv.friendlyName || tv.ip}: ${reason}; playback commands skipped.`);
     }
-    if (!playbackCandidates.length) throw new Error('No online TV has verified AVTransport SetAVTransportURI and Play capabilities. See per-TV diagnostics above.');
+    if (!candidates.length) throw new Error('No online TV has a verified AVTransport or RunBrowser capability. See per-TV diagnostics above.');
 
-    log(`5/6 Sending ${mediaUrl} to ${playbackCandidates.length} verified online TV(s)...`);
-    const playbackResults = await Promise.allSettled(playbackCandidates.map((tv) =>
-      API.samsungFleetAction({ ip: tv.ip, action: 'play-url', value: mediaUrl })
-    ));
-    const playbackByIP = new Map();
-    playbackResults.forEach((settled, index) => {
-      const tv = playbackCandidates[index];
-      const result = settled.status === 'fulfilled' ? settled.value : { ok: false, error: settled.reason?.message || 'IPC request failed' };
-      playbackByIP.set(tv.ip, result);
-      const setUri = result.setUri;
-      const setUriState = setUri ? (setUri.ok ? 'SUCCESS' : `FAILED ${setUri.errorDescription || setUri.errorCode || setUri.error || setUri.statusCode}`) : (result.ok ? 'SUCCESS' : 'FAILED');
-      log(`${tv.friendlyName} ${tv.ip}: SetAVTransportURI ${setUriState}; Play ${result.ok ? 'ACCEPTED' : `FAILED ${result.errorDescription || result.errorCode || result.error || result.statusCode || 'unknown error'}`}`);
-    });
-
-    log('6/6 Verifying AVTransport PLAYING...');
-    let states = [];
-    const deadline = Date.now() + 15000;
-    while (Date.now() < deadline) {
-      const status = await API.samsungFleetStatus();
-      states = status?.states || [];
-      for (const state of states) samsungFleetState.set(state.ip, state);
-      renderSamsungFleet();
-      const candidateStates = playbackCandidates.map((tv) => states.find((state) => state.ip === tv.ip));
-      if (candidateStates.every((state) => state && (state.transport === 'PLAYING' || playbackByIP.get(state.ip)?.ok !== true))) break;
-      await new Promise((resolve) => setTimeout(resolve, 750));
-    }
-
-    const candidateStates = playbackCandidates.map((tv) => states.find((state) => state.ip === tv.ip));
-    let playing = 0;
-    for (let index = 0; index < playbackCandidates.length; index++) {
-      const tv = playbackCandidates[index];
-      const state = candidateStates[index];
-      const command = playbackByIP.get(tv.ip);
-      if (command?.ok && state?.transport === 'PLAYING') {
-        playing += 1;
-        log(`${tv.friendlyName} ${tv.ip}: PLAYING CONFIRMED; physical video observation still required.`);
-      } else if (!command?.ok) {
-        log(`${tv.friendlyName} ${tv.ip}: COMMAND FAILED; ${command?.errorDescription || command?.errorCode || command?.error || 'unknown error'}`);
+    log(`5/6 Testing MP4 before opening live browser pages on ${candidates.length} verified online TV(s), one at a time...`);
+    let mp4Attempted = 0;
+    let mp4Accepted = 0;
+    let mp4Playing = 0;
+    let mp4Failed = 0;
+    let browserAttempted = 0;
+    let browserAccepted = 0;
+    let browserNoResponse = 0;
+    let browserFailed = 0;
+    for (const tv of candidates) {
+      if (canPlayMedia(tv)) {
+        mp4Attempted += 1;
+        let mp4Result, mp4IpcError = '';
+        try {
+          mp4Result = await API.samsungFleetAction({ ip: tv.ip, action: 'play-url', value: mediaUrl });
+        } catch (err) {
+          mp4IpcError = err?.message || 'IPC request failed';
+          mp4Result = { ok: false, error: mp4IpcError };
+        }
+        if (mp4Result?.ok) {
+          mp4Accepted += 1;
+          const transport = String(mp4Result.state?.transport || '').toUpperCase();
+          if (transport === 'PLAYING') mp4Playing += 1;
+          log(`${tv.friendlyName} ${tv.ip}: MP4 URI/Play ACCEPTED; initial AVTransport state ${transport || 'unknown'}.`);
+        } else {
+          mp4Failed += 1;
+          const reason = mp4Result?.errorDescription || mp4Result?.errorCode || mp4Result?.error || `HTTP ${mp4Result?.statusCode || 'no response'}`;
+          log(`${tv.friendlyName} ${tv.ip}: MP4 test FAILED; ${reason}.`);
+        }
       } else {
-        log(`${tv.friendlyName} ${tv.ip}: NOT PLAYING (${state?.transport || 'UNKNOWN'}); physical TV observation required for diagnosis.`);
+        log(`${tv.friendlyName} ${tv.ip}: MP4 test skipped; AVTransport capability not verified.`);
+      }
+
+      if (!tv.capabilities?.runBrowser) {
+        log(`${tv.friendlyName} ${tv.ip}: live browser launch skipped; RunBrowser capability not verified.`);
+        continue;
+      }
+
+      browserAttempted += 1;
+      let browserResult, browserIpcError = '';
+      try {
+        browserResult = await API.samsungFleetAction({ ip: tv.ip, action: 'open-browser', value: browserUrl });
+      } catch (err) {
+        browserIpcError = err?.message || 'IPC request failed';
+        browserResult = { ok: false, error: browserIpcError };
+      }
+      if (browserResult?.ok) {
+        browserAccepted += 1;
+        log(`${tv.friendlyName} ${tv.ip}: RunBrowser ACCEPTED after MP4 test; confirm live video on the physical screen.`);
+      } else if (browserResult?.statusCode === 0 && !browserIpcError) {
+        browserNoResponse += 1;
+        log(`${tv.friendlyName} ${tv.ip}: RunBrowser returned no SOAP response; outcome is unknown. No retry sent; verify the physical screen.`);
+      } else {
+        browserFailed += 1;
+        const reason = browserResult?.errorDescription || browserResult?.errorCode || browserResult?.error || `HTTP ${browserResult?.statusCode || 'no response'}`;
+        log(`${tv.friendlyName} ${tv.ip}: RunBrowser FAILED after MP4 test; ${reason}. Other TVs will continue independently.`);
       }
     }
 
-    log(`SOFTWARE PLAYBACK: ${playing}/${playbackCandidates.length} verified online TV(s) confirmed PLAYING.`);
-    log('PHYSICAL VIDEO CONFIRMATION REQUIRED.');
-    showToast(playing ? `Samsung Mode: ${playing}/${playbackCandidates.length} TV(s) PLAYING` : 'Samsung Mode: no TV confirmed PLAYING', playing ? 'success' : 'error');
+    log('6/6 Browser playback needs physical video/audio confirmation; AVTransport does not report browser playback state.');
+    log(`MP4 TEST: ${mp4Attempted} attempted; ${mp4Accepted} URI/Play accepted; ${mp4Playing} initial PLAYING states; ${mp4Failed} failed.`);
+    log(`LIVE BROWSER: ${browserAttempted} attempted; ${browserAccepted} acknowledged; ${browserNoResponse} returned no SOAP response; ${browserFailed} explicit failures.`);
+    const browserCommandObserved = browserAccepted > 0 || browserNoResponse > 0;
+    showToast(browserCommandObserved ? `Samsung Mode: ${browserAccepted} acknowledged, ${browserNoResponse} without reply; check TV screens` : 'Samsung Mode: no live browser command was acknowledged', browserCommandObserved ? 'info' : 'error');
   } catch (err) {
     log(`FAILED: ${err.message}`);
     showToast(err.message, 'error');
@@ -805,6 +872,29 @@ function init() {
   $('samsungModeBtn').addEventListener('click', startSamsungMode);
   $('samsungStopWallBtn')?.addEventListener('click', stopSamsungWall);
   $('samsungHlsTestBtn')?.addEventListener('click', testSamsungHls);
+  $('fleetDiscoverBtn')?.addEventListener('click', discoverSamsungFleet);
+  $('fleetRefreshBtn')?.addEventListener('click', refreshSamsungFleetState);
+  $('fleetPlayAllBtn')?.addEventListener('click', () => {
+    const mediaUrl = $('fleetMediaUrl')?.value.trim() || '';
+    if (!mediaUrl) {
+      showToast('Enter a media URL first', 'error');
+      return;
+    }
+    runSamsungFleetAll('play-url', mediaUrl);
+  });
+  $('fleetSwitchHdmiAllBtn')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await runSamsungFleetAll('switch-hdmi');
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $('fleetStopAllBtn')?.addEventListener('click', () => runSamsungFleetAll('stop'));
+  $('fleetMuteAllBtn')?.addEventListener('click', () => runSamsungFleetAll('mute', true));
+  $('fleetUnmuteAllBtn')?.addEventListener('click', () => runSamsungFleetAll('mute', false));
+  $('samsungFleetBody')?.addEventListener('click', handleSamsungFleetControlClick);
   $('samsungRefreshBtn').addEventListener('click', async () => {
     await refreshSamsungStatus();
     await refreshServerRuntimeStatus();

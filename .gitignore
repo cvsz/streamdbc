@@ -38,6 +38,8 @@ Thumbs.db
 # Desktop client
 client/dist/
 client/node_modules/
+/client/assets/apps.ico
+/client/server-runtime/
 
 # Android TV client
 client/tv/.gradle/

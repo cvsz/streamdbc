@@ -125,7 +125,7 @@ func TestSyntheticFFmpegHLSCompatibility(t *testing.T) {
 			audio = stream
 		}
 	}
-	if probe.Format.Name != "mpegts" || video == nil || video.Profile != "Main" || video.PixelFmt != "yuv420p" || video.Width != 1280 || video.Height != 720 || video.FrameRate != "30/1" {
+	if probe.Format.Name != "mpegts" || video == nil || video.Profile != "Constrained Baseline" || video.PixelFmt != "yuv420p" || video.Width != 1280 || video.Height != 720 || video.FrameRate != "30/1" {
 		t.Fatalf("unexpected video/container compatibility: format=%q video=%+v output=%s", probe.Format.Name, video, fmt.Sprint(probeOutput))
 	}
 	if audio == nil || audio.Profile != "LC" || audio.SampleRate != "48000" || audio.Channels != 2 {

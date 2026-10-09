@@ -664,7 +664,11 @@ function openLocalTVPage() {
 }
 
 function updateTrayMenu() {
-  if (!tray) return;
+  const currentTray = tray;
+  if (!currentTray || currentTray.isDestroyed()) {
+    if (tray === currentTray) tray = null;
+    return;
+  }
   const running = Boolean(serverProcess && !serverProcess.killed);
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Open StreamDBC Control Panel', click: () => { mainWindow?.show(); mainWindow?.focus(); } },
@@ -685,7 +689,7 @@ function updateTrayMenu() {
       }
     }
   ]);
-  tray.setContextMenu(contextMenu);
+  currentTray.setContextMenu(contextMenu);
 }
 
 function createTray() {
@@ -1217,7 +1221,11 @@ app.on('before-quit', createBeforeQuitHandler({
   platform: process.platform
 }));
 
-app.on('window-all-closed', () => handleWindowAllClosed(app, tray, process.platform));
+app.on('window-all-closed', () => {
+  const trayToDestroy = tray;
+  if (process.platform !== 'darwin') tray = null;
+  handleWindowAllClosed(app, trayToDestroy, process.platform);
+});
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
@@ -1394,10 +1402,21 @@ ipcMain.handle('samsung-fleet-action', async (event, data) => {
   if (!tv) return { ok: false, error: 'TV is not in the current discovered Samsung fleet.' };
   try {
     let value = data?.value;
-    if (data?.action === 'play-url') {
+    if (data?.action === 'play-url' || data?.action === 'open-browser') {
       value = validateLanMediaUrl(value, getLanIPv4Candidates().map((lan) => lan.address));
+    }
+    if (data?.action === 'play-url') {
       if (!tv.capabilities?.setAVTransportURI || !tv.capabilities?.play) {
         return { ok: false, error: 'AVTransport SetAVTransportURI and Play capabilities are not verified for this TV.' };
+      }
+    }
+    if (data?.action === 'open-browser' && !tv.capabilities?.runBrowser) {
+      return { ok: false, error: 'RunBrowser capability is not verified for this TV.' };
+    }
+    if (data?.action === 'switch-hdmi') {
+      if (!tv.known) return { ok: false, error: 'HDMI switching is limited to the configured Samsung fleet.' };
+      if (!tv.capabilities?.getSourceList || !tv.capabilities?.setMainTVSource || !tv.capabilities?.getCurrentExternalSource) {
+        return { ok: false, error: 'Verified Samsung source-list, source-select, and source-read-back capabilities are required.' };
       }
     }
     if (data?.action === 'stop' && !tv.capabilities?.stop) {
@@ -1411,14 +1430,43 @@ ipcMain.handle('samsung-fleet-action', async (event, data) => {
 });
 
 ipcMain.handle('samsung-fleet-action-all', async (event, data) => {
+  if (data?.action === 'switch-hdmi') {
+    const targets = samsungFleet.filter((tv) => tv.known === true);
+    if (!targets.length) return { ok: false, results: [], error: 'No configured Samsung TVs are available.' };
+    const results = [];
+    let commandSent = false;
+    for (const tv of targets) {
+      if (!tv.online) {
+        results.push({ ip: tv.ip, ok: false, error: 'TV is offline or no allowlisted TCP port responded.' });
+        continue;
+      }
+      if (!tv.capabilities?.getSourceList || !tv.capabilities?.setMainTVSource || !tv.capabilities?.getCurrentExternalSource) {
+        results.push({ ip: tv.ip, ok: false, error: 'Verified Samsung source-control capabilities are not available.' });
+        continue;
+      }
+      if (commandSent) await new Promise((resolve) => setTimeout(resolve, 1000));
+      try {
+        results.push({ ip: tv.ip, ...await runTVAction(tv, 'switch-hdmi') });
+      } catch (err) {
+        results.push({ ip: tv.ip, ok: false, error: err.message });
+      }
+      commandSent = true;
+    }
+    return { ok: results.length > 0 && results.every((item) => item.ok), results };
+  }
   const results = await Promise.all(samsungFleet.map(async (tv) => {
     if (!tv.online) return { ip: tv.ip, ok: false, error: 'TV is offline or no allowlisted port responded.' };
     if (data?.action === 'play-url' && (!tv.capabilities?.setAVTransportURI || !tv.capabilities?.play)) {
       return { ip: tv.ip, ok: false, error: 'AVTransport SetAVTransportURI and Play capabilities are not verified.' };
     }
+    if (data?.action === 'open-browser' && !tv.capabilities?.runBrowser) {
+      return { ip: tv.ip, ok: false, error: 'RunBrowser capability is not verified.' };
+    }
     try {
       let value = data?.value;
-      if (data?.action === 'play-url') value = validateLanMediaUrl(value, getLanIPv4Candidates().map((lan) => lan.address));
+      if (data?.action === 'play-url' || data?.action === 'open-browser') {
+        value = validateLanMediaUrl(value, getLanIPv4Candidates().map((lan) => lan.address));
+      }
       const result = await runTVAction(tv, data?.action, value);
       return { ip: tv.ip, ...result };
     } catch (err) {

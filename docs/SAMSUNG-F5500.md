@@ -6,10 +6,10 @@ while the Windows Single Control Panel discovers Samsung TVs over SSDP and
 controls their advertised UPnP services. The TV does not receive or need NDI
 directly.
 
-The supported server profile is 1280x720, 30 fps, H.264 Main level 3.1,
-yuv420p, AAC-LC stereo at 48 kHz, two-second MPEG-TS segments, and a six-entry
-playlist. Typical glass-to-glass latency is approximately 6–15 seconds. The
-optional 1080p profile has not been validated on the UA40F5500.
+The supported server profile is 1280x720 at 30 fps, H.264 Constrained Baseline
+level 3.1, yuv420p, AAC-LC stereo at 48 kHz, two-second MPEG-TS segments, and a
+six-entry playlist. Typical glass-to-glass latency is approximately 6–15
+seconds. The optional 1080p profile has not been validated on the UA40F5500.
 
 DirectShow negotiates the frame rate exposed by the vMix device; the gateway
 then encodes the selected profile frame rate. This supports vMix outputs that
@@ -69,6 +69,13 @@ $env:STREMDBC_API_KEY = ((New-Guid).Guid + (New-Guid).Guid)
 
 The JWT secret must be at least 32 characters. The API key is required by the
 gateway start/stop/restart endpoints.
+
+The checked-in `configs/samsung-f5500.yaml` uses `source: vmix_external` and
+captures the `vMix Video` and `vMix Audio` DirectShow devices. This checkout
+does not implement RTMP audio/video ingest; an open port 1935 or a configured
+vMix RTMP destination is not evidence that media reaches the Samsung gateway.
+Verify the exact running executable and configuration before relying on RTMP
+ingest.
 
 ## 2. Enable vMix External Output
 
@@ -208,7 +215,7 @@ long-running soak.
   A plain-text `GET /tv/ping` (expect `pong`) checks basic reachability
   before involving HLS at all.
 - If decode is unstable, edit the profile to use a lower video bitrate while
-  retaining 1280x720, 25/30 fps, H.264 Main/Baseline-compatible output,
+  retaining 1280x720, 25/30 fps, H.264 Constrained Baseline output,
   AAC-LC, and two-second MPEG-TS segments. Re-run config validation and the
   synthetic FFmpeg test before another TV attempt.
 - If audio triggers playback failure, test video-only as a diagnostic, then
@@ -247,15 +254,21 @@ still require valid tokens because they are separate authenticated surfaces.
 
 ## 9. Single Control Panel fleet workflow
 
-Use the Windows Control Panel v1.4.0 Samsung TV view.
+Use the Samsung TV view in the Windows Control Panel. The current workspace
+targets v1.4.1, but its latest source changes have not been packaged.
 
 1. Start or verify the StreamDBC server and FFmpeg runtime.
 2. Click **Discover TVs**.
 3. Confirm each expected UA40F5500 appears with AVTransport.
 4. Enter the media URL that the TVs can reach from the LAN.
-5. Use **Play URL** per TV or **Play URL on All**.
-6. Use **Refresh State** to read transport, volume and mute status.
-7. Use **Stop**, **Set Vol**, **Mute/Unmute**, or the all-TV equivalents.
+5. Use **Start Samsung Mode** to test the known-good MP4 and open the live
+   browser page on the TVs sequentially.
+6. Verify physical video and audio on each screen. SOAP acceptance is not
+   playback confirmation.
+7. Use **Switch All to HDMI** to select each TV's reported connected HDMI
+   input; check its input read-back.
+8. Use **Refresh State** to read transport, input, volume and mute status.
+9. Use **Stop**, **Set Vol**, **Mute/Unmute**, or the all-TV equivalents.
 
 A typical live URL is:
 
@@ -267,11 +280,21 @@ Do not assume HLS is accepted by AVTransport until the physical TV confirms it.
 For compatibility testing, start with a known-good HTTP MP4, then test MPEG-TS
 and HLS.
 
-### Current fleet behavior validated by discovery
+### Current fleet behavior and status
 
-The current UA40F5500 fleet exposes MediaRenderer, AVTransport,
-RenderingControl, ConnectionManager, MainTVAgent2, and DIAL-family services.
-The exact `/smp_*` numbers vary by device.
+TV-81, TV-82, TV-89, TV-90 and TV-91 were discovered online. The latest HDMI
+command was confirmed by source read-back on all five: TV-81/82/89/91 reported
+HDMI1; TV-90 reported HDMI2. The operator previously confirmed an HDMI picture
+on all five. The operator also confirmed MP4 picture and audio on all five.
+
+In the latest reported browser run, `RunBrowser` was acknowledged on all five,
+but the operator reported that Live Browser displayed `Offline`. The affected
+TV ID was not recorded. PC-side playlist readiness is not proof of TV decode;
+live browser picture and audio remain unconfirmed.
+
+An earlier attempt to send the HLS playlist through AVTransport failed on all
+five TVs with `Illegal MIME-type`. MP4 acceptance, browser launch acceptance,
+and HLS decode are separate results.
 
 ### Production acceptance
 
@@ -287,3 +310,6 @@ evidence for:
 - source loss/recovery;
 - Wi-Fi interruption recovery;
 - latency, CPU/RAM and soak duration.
+
+See [`SAMSUNG-CURRENT-STATUS.md`](SAMSUNG-CURRENT-STATUS.md) for the evidence
+boundaries and the ordered close-fix, Live Browser, fleet and soak checklist.
