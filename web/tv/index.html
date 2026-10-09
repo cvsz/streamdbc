@@ -12,7 +12,7 @@
   </style>
 </head>
 <body>
-  <video id="player" autoplay muted playsinline preload="auto" src="/tv/live/index.m3u8">
+  <video id="player" autoplay muted playsinline preload="auto">
     Video playback is unavailable. Open /tv/live/index.m3u8 directly.
   </video>
   <div id="message">Connecting to live video...</div>
@@ -21,6 +21,25 @@
       var player = document.getElementById('player');
       var message = document.getElementById('message');
       var retryTimer = null;
+      var playAttempt = 0;
+      var streamPath = '/tv/live/index.m3u8';
+
+      function beacon(eventName, detail) {
+        try {
+          var image = new Image();
+          image.src = '/tv/ping?event=' + encodeURIComponent(eventName) +
+            '&detail=' + encodeURIComponent(detail || '') +
+            '&t=' + new Date().getTime();
+        } catch (error) {}
+      }
+
+      function mediaErrorDetail() {
+        try {
+          return player.error ? String(player.error.code || 'unknown') : 'none';
+        } catch (error) {
+          return 'unavailable';
+        }
+      }
 
       function showMessage(text) {
         message.innerHTML = text;
@@ -36,54 +55,93 @@
           try {
             player.muted = false;
             player.volume = 1;
-          } catch (error) {}
+            beacon('audio-unmute-attempt', 'volume=1');
+          } catch (error) {
+            beacon('audio-unmute-error', String(error && error.message || error));
+          }
         }, 750);
+      }
+
+      function refreshSource() {
+        playAttempt += 1;
+        player.src = streamPath + '?attempt=' + playAttempt + '&t=' + new Date().getTime();
       }
 
       function play() {
         try {
+          beacon('play-attempt', 'attempt=' + (playAttempt + 1));
           player.muted = true;
+          refreshSource();
           player.load();
           var result = player.play();
           if (result && typeof result.then === 'function') {
-            result.then(unmuteAfterStart).catch(function () {
+            result.then(function () {
+              beacon('play-promise-resolved', '');
+              unmuteAfterStart();
+            }).catch(function (error) {
+              beacon('play-promise-rejected', String(error && error.message || error));
               showMessage('Autoplay blocked. Retrying...');
               window.setTimeout(play, 1500);
             });
           } else {
+            beacon('play-invoked-legacy', '');
             unmuteAfterStart();
           }
         } catch (error) {
+          beacon('play-exception', String(error && error.message || error));
           showMessage('Autoplay retrying...');
           window.setTimeout(play, 1500);
         }
       }
 
-      function retry() {
+      function retry(reason) {
         if (retryTimer !== null) {
           window.clearTimeout(retryTimer);
         }
+        beacon(reason || 'retry', 'mediaError=' + mediaErrorDetail() + ';readyState=' + player.readyState + ';networkState=' + player.networkState);
         showMessage('Stream offline. Retrying...');
         retryTimer = window.setTimeout(play, 3000);
       }
 
+      player.addEventListener('loadstart', function () {
+        beacon('loadstart', '');
+      }, false);
+      player.addEventListener('loadedmetadata', function () {
+        beacon('loadedmetadata', 'duration=' + player.duration);
+      }, false);
+      player.addEventListener('canplay', function () {
+        beacon('canplay', 'readyState=' + player.readyState);
+      }, false);
       player.addEventListener('playing', function () {
+        beacon('playing', 'readyState=' + player.readyState);
         hideMessage();
         unmuteAfterStart();
       }, false);
-      player.addEventListener('error', retry, false);
-      player.addEventListener('stalled', retry, false);
+      player.addEventListener('waiting', function () {
+        beacon('waiting', 'readyState=' + player.readyState);
+      }, false);
+      player.addEventListener('error', function () {
+        retry('error');
+      }, false);
+      player.addEventListener('stalled', function () {
+        retry('stalled');
+      }, false);
+      player.addEventListener('abort', function () {
+        beacon('abort', 'networkState=' + player.networkState);
+      }, false);
 
       document.onkeydown = function (event) {
         event = event || window.event;
         var code = event.keyCode || event.which;
         if (code === 13 || code === 415 || code === 19 || code === 403) {
+          beacon('remote-play-key', 'key=' + code);
           play();
           return false;
         }
         return true;
       };
 
+      beacon('page-loaded', 'ua=' + String(navigator.userAgent || '').substring(0, 160));
       play();
     }());
   </script>
