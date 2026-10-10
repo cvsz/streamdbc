@@ -15,7 +15,7 @@ const ALLOWED_PORT_SET = new Set(ALLOWED_TV_PORTS);
 const CAPABILITY_NAMES = Object.freeze([
   'mediaRenderer', 'avTransport', 'renderingControl', 'connectionManager', 'mainTVAgent2',
   'setAVTransportURI', 'play', 'stop', 'pause', 'runBrowser',
-  'getSourceList', 'getCurrentExternalSource', 'setMainTVSource'
+  'getSourceList', 'getCurrentExternalSource', 'setMainTVSource', 'getDTVInformation'
 ]);
 
 function isPrivateIPv4(value) {
