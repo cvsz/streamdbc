@@ -96,7 +96,10 @@ func (commandRunner) Start(ctx context.Context, executable string, args []string
 
 func (p *commandProcess) Wait() error {
 	err := p.cmd.Wait()
+	// Close stdin first to signal graceful shutdown
 	_ = p.stdinWriter.Close()
+	// Close the process tree guard to release FFmpeg job object
+	// This must happen after cmd.Wait() to ensure graceful shutdown
 	if p.treeGuard != nil {
 		if closeErr := p.treeGuard.Close(); err == nil && closeErr != nil {
 			err = closeErr
@@ -336,9 +339,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 	}
 	cancel, done := m.cancel, m.done
 	m.mu.RUnlock()
+	// Cancel the context to signal all goroutines to stop
 	if cancel != nil {
 		cancel()
 	}
+	// Wait for the done channel to close, indicating graceful shutdown
 	select {
 	case <-done:
 		return nil
@@ -369,6 +374,8 @@ func (m *Manager) Status() Status {
 }
 
 func (m *Manager) run(ctx context.Context, gen uint64, done chan struct{}) {
+	// Defer cleanup to ensure process resources are released even if the function exits early
+	var child process
 	defer func() {
 		finalState := StateStopped
 		m.mu.RLock()
@@ -378,6 +385,38 @@ func (m *Manager) run(ctx context.Context, gen uint64, done chan struct{}) {
 		m.mu.RUnlock()
 		m.finish(gen, finalState)
 		close(done)
+
+		// Ensure FFmpeg process is properly terminated even if unexpected exit occurs
+		if child != nil {
+			if cp, ok := child.(*commandProcess); ok {
+				// Signal graceful shutdown if process is still running
+				if cp.stdinWriter != nil {
+					// Best-effort write: io.Writer reports (n, err) and both are
+					// discarded; the interrupt signal below remains the fallback.
+					_, _ = cp.stdinWriter.Write([]byte("q\n"))
+					_ = cp.stdinWriter.Close()
+				}
+				// Force kill if the process doesn't terminate gracefully
+				if cp.cmd != nil && cp.cmd.ProcessState == nil {
+					// Send interrupt signal first
+					_ = cp.cmd.Process.Signal(os.Interrupt)
+					// Wait a bit for graceful termination
+					timer := time.NewTimer(2 * time.Second)
+					defer timer.Stop()
+					sel := make(chan error, 1)
+					go func() {
+						sel <- cp.cmd.Wait()
+					}()
+					select {
+					case <-timer.C:
+						// Force kill if timeout expires
+						_ = cp.cmd.Process.Kill()
+					case <-sel:
+						// Process exited gracefully
+					}
+				}
+			}
+		}
 	}()
 
 	attempt := 0
@@ -406,7 +445,7 @@ func (m *Manager) run(ctx context.Context, gen uint64, done chan struct{}) {
 			m.finish(gen, StateFailed)
 			return
 		}
-		child, err := m.runner.Start(ctx, m.executable, args)
+		child, err = m.runner.Start(ctx, m.executable, args)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
