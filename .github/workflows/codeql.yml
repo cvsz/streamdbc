@@ -37,3 +37,10 @@ jobs:
 
       - name: Analyze
         uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4
+        with:
+          # Route scans back into the legacy /language:go alert stream. The
+          # September 2026 alerts were recorded under that category; the action
+          # now derives ".github/workflows/codeql.yml:analyze", so default-branch
+          # analyses no longer attach to the original stream and stale alerts
+          # stay open even when current code is clean.
+          category: "/language:go"
