@@ -57,6 +57,7 @@ type Server struct {
 	rateLimit        int
 	rateMu           sync.Mutex
 	rateEntries      map[string]*rateEntry
+	rateSweepAt      time.Time
 	samsungTV        *samsung.Manager
 }
 
@@ -66,6 +67,13 @@ type rateEntry struct {
 }
 
 const maxLogValueRunes = 512
+
+const (
+	// maxRateEntries hard-caps limiter memory so a client rotating source
+	// addresses (notably IPv6) cannot grow the map without bound.
+	maxRateEntries    = 1 << 16
+	rateSweepInterval = 30 * time.Second
+)
 
 // logSafeValue prevents untrusted values from forging additional log records.
 // Keep sanitization immediately before structured logging so static analysis can
@@ -1017,6 +1025,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		StreamID string `json:"stream_id"`
 		Action   string `json:"action"`
+		IP       string `json:"ip"`
 	}
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -1025,15 +1034,27 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Tokens are bound to the requesting address unless the caller names the
+	// address that will actually use the token (e.g. an encoder on another host).
+	bindIP := s.clientIP(r)
+	if req.IP != "" {
+		parsed := net.ParseIP(req.IP)
+		if parsed == nil {
+			s.badRequest(w, "ip must be a valid IP address")
+			return
+		}
+		bindIP = parsed.String()
+	}
+
 	var (
 		token string
 		err   error
 	)
 	switch req.Action {
 	case "publish":
-		token, err = manager.GeneratePublishToken(req.StreamID, r.Header.Get("X-API-Key"), s.clientIP(r))
+		token, err = manager.GeneratePublishToken(req.StreamID, r.Header.Get("X-API-Key"), bindIP)
 	case "play":
-		token, err = manager.GeneratePlayToken(req.StreamID, s.clientIP(r))
+		token, err = manager.GeneratePlayToken(req.StreamID, bindIP)
 	default:
 		s.badRequest(w, "action must be publish or play")
 		return
@@ -1157,29 +1178,55 @@ func parseTrustedProxies(values []string) []*net.IPNet {
 	return result
 }
 
-func (s *Server) clientIP(r *http.Request) string {
-	remote := directClientIP(r)
-	ip := net.ParseIP(remote)
-	trusted := false
+func (s *Server) isTrustedProxy(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
 	for _, network := range s.trustedProxies {
-		if ip != nil && network.Contains(ip) {
-			trusted = true
-			break
+		if network.Contains(ip) {
+			return true
 		}
 	}
-	if !trusted {
+	return false
+}
+
+// clientIP returns the originating client address. Forwarding headers are only
+// consulted when the direct peer is a configured trusted proxy. The
+// X-Forwarded-For chain is walked right to left and the first address that is
+// not itself a trusted proxy wins: every hop to the left of that address is
+// client-controlled and must not be believed. CF-Connecting-IP is honoured
+// only because Cloudflare overwrites it; list as trusted only proxies that
+// strip or overwrite that header.
+func (s *Server) clientIP(r *http.Request) string {
+	remote := directClientIP(r)
+	if !s.isTrustedProxy(net.ParseIP(remote)) {
 		return remote
 	}
 	if candidate := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); net.ParseIP(candidate) != nil {
 		return candidate
 	}
-	for _, candidate := range strings.Split(r.Header.Get("X-Forwarded-For"), ",") {
-		candidate = strings.TrimSpace(candidate)
-		if net.ParseIP(candidate) != nil {
-			return candidate
+	hops := strings.Split(strings.Join(r.Header.Values("X-Forwarded-For"), ","), ",")
+	for i := len(hops) - 1; i >= 0; i-- {
+		candidate := strings.TrimSpace(hops[i])
+		ip := net.ParseIP(candidate)
+		if ip == nil {
+			return remote
 		}
+		if s.isTrustedProxy(ip) {
+			continue
+		}
+		return candidate
 	}
 	return remote
+}
+
+// rateKey groups IPv6 clients by /64 so one host cannot mint unlimited keys.
+func rateKey(ip string) string {
+	parsed := net.ParseIP(ip)
+	if parsed == nil || parsed.To4() != nil {
+		return ip
+	}
+	return parsed.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
@@ -1189,7 +1236,7 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		key := s.clientIP(r)
+		key := rateKey(s.clientIP(r))
 		now := time.Now()
 		limited := false
 
@@ -1204,11 +1251,18 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 		} else {
 			entry.count++
 		}
-		if len(s.rateEntries) > 4096 {
+		if len(s.rateEntries) > 4096 && now.Sub(s.rateSweepAt) >= rateSweepInterval {
+			s.rateSweepAt = now
 			for candidate, value := range s.rateEntries {
 				if now.Sub(value.windowStart) >= 2*time.Minute {
 					delete(s.rateEntries, candidate)
 				}
+			}
+		}
+		for len(s.rateEntries) > maxRateEntries {
+			for candidate := range s.rateEntries {
+				delete(s.rateEntries, candidate)
+				break
 			}
 		}
 		s.rateMu.Unlock()
