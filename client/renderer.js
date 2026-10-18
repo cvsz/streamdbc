@@ -501,6 +501,8 @@ function renderSamsungFleet() {
         <button class="btn btn-sm" data-fleet-action="stop" ${tv.online && tv.capabilities?.stop ? '' : 'disabled'}>Stop</button>
         <button class="btn btn-sm" data-fleet-action="volume" ${tv.online && tv.capabilities?.renderingControl ? '' : 'disabled'}>Set Vol</button>
         <button class="btn btn-sm" data-fleet-action="${muted ? 'unmute' : 'mute'}" ${tv.online && tv.capabilities?.renderingControl ? '' : 'disabled'}>${muted ? 'Unmute' : 'Mute'}</button>
+        <button class="btn btn-sm" data-fleet-action="power-off" ${tv.online ? '' : 'disabled'}>Power Off</button>
+        <button class="btn btn-sm" data-fleet-action="power-on" ${tv.known && !tv.online ? '' : 'disabled'}>Power On</button>
       </div></td>
     </tr>`;
   }).join('');
@@ -559,6 +561,14 @@ async function runSamsungFleetAction(ip, action, value) {
     return false;
   }
   if (result.state) samsungFleetState.set(ip, result.state);
+  if (result.phase) {
+    const tv = samsungFleet.find((item) => item.ip === ip);
+    if (result.phase === 'POWER_OFF_CONFIRMED' && tv) tv.online = false;
+    if (result.phase === 'POWER_ON_CONFIRMED' && tv) tv.online = true;
+    renderSamsungFleet();
+    showToast(`${ip}: ${result.phase}${result.detail ? ` — ${result.detail}` : ''}`, 'success');
+    return true;
+  }
   renderSamsungFleet();
   if (action === 'switch-hdmi') {
     showToast(`${ip}: switched to ${result.source?.type || 'HDMI'} and confirmed`, 'success');
@@ -577,6 +587,17 @@ async function runSamsungFleetAll(action, value) {
     const confirmed = (result?.results || []).filter((item) => item.ok).length;
     const total = (result?.results || []).length;
     showToast(`HDMI confirmed on ${confirmed}/${total} TV(s)`, total > 0 && confirmed === total ? 'success' : 'error');
+  } else if (action === 'power-off' || action === 'power-on') {
+    const attempted = (result?.results || []).filter((item) => !item.skipped);
+    const powerOk = attempted.length > 0 && attempted.every((item) => item.ok);
+    const lines = attempted.map((item) =>
+      `${item.ip}: ${item.ok ? item.phase : `FAILED; ${item.error || item.phase || 'unverified'}`}${item.ok && item.detail ? ` — ${item.detail}` : ''}`
+    );
+    showToast(`Power ${action === 'power-off' ? 'Off' : 'On'} All on ${attempted.length} TV(s)`, powerOk ? 'success' : 'error');
+    if (lines.length) {
+      const output = $('builderOutput');
+      if (output) output.textContent += (output.textContent ? '\n' : '') + lines.join('\n') + '\n';
+    }
   } else if (failed.length) {
     showToast(`${failed.length} TV action(s) failed`, 'error');
   } else {
@@ -894,6 +915,26 @@ function init() {
   $('fleetStopAllBtn')?.addEventListener('click', () => runSamsungFleetAll('stop'));
   $('fleetMuteAllBtn')?.addEventListener('click', () => runSamsungFleetAll('mute', true));
   $('fleetUnmuteAllBtn')?.addEventListener('click', () => runSamsungFleetAll('mute', false));
+  $('fleetPowerOffAllBtn')?.addEventListener('click', async (event) => {
+    if (!window.confirm('Power off every online Samsung TV?')) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await runSamsungFleetAll('power-off');
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $('fleetPowerOnAllBtn')?.addEventListener('click', async (event) => {
+    if (!window.confirm('Wake every offline Samsung TV over Wake-on-LAN? Wake on LAN must be enabled on the TVs.')) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await runSamsungFleetAll('power-on');
+    } finally {
+      button.disabled = false;
+    }
+  });
   $('samsungFleetBody')?.addEventListener('click', handleSamsungFleetControlClick);
   $('samsungRefreshBtn').addEventListener('click', async () => {
     await refreshSamsungStatus();
