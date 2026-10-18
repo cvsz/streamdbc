@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const os = require('os');
 const { discoverFleetDetailed, getTVState, hydrateKnownDescription, runTVAction } = require('./samsung-fleet');
 const { applyProbeResults, mergeKnownAndDiscovered, probeKnownFleet, validateLanMediaUrl } = require('./samsung-fleet-inventory');
+const { powerOffTV, powerOnTV } = require('./samsung-fleet-remote');
 const { runHlsSmokeTest } = require('./hls-smoke');
 const { createBeforeQuitHandler, handleWindowClose, handleWindowAllClosed, terminateManagedProcessTree, getUnexpectedManagedProcessExitError } = require('./window-lifecycle');
 
@@ -1402,6 +1403,9 @@ ipcMain.handle('samsung-fleet-action', async (event, data) => {
   if (!tv) return { ok: false, error: 'TV is not in the current discovered Samsung fleet.' };
   try {
     let value = data?.value;
+    if (data?.action === 'power-off' || data?.action === 'power-on') {
+      return data.action === 'power-off' ? await powerOffTV(tv) : await powerOnTV(tv);
+    }
     if (data?.action === 'play-url' || data?.action === 'open-browser') {
       value = validateLanMediaUrl(value, getLanIPv4Candidates().map((lan) => lan.address));
     }
@@ -1455,6 +1459,14 @@ ipcMain.handle('samsung-fleet-action-all', async (event, data) => {
     return { ok: results.length > 0 && results.every((item) => item.ok), results };
   }
   const results = await Promise.all(samsungFleet.map(async (tv) => {
+    if (data?.action === 'power-off') {
+      if (!tv.online) return { ip: tv.ip, ok: false, skipped: true, error: 'TV already appears offline.' };
+      return { ip: tv.ip, ...(await powerOffTV(tv)) };
+    }
+    if (data?.action === 'power-on') {
+      if (tv.online) return { ip: tv.ip, ok: false, skipped: true, error: 'TV is already online.' };
+      return { ip: tv.ip, ...(await powerOnTV(tv)) };
+    }
     if (!tv.online) return { ip: tv.ip, ok: false, error: 'TV is offline or no allowlisted port responded.' };
     if (data?.action === 'play-url' && (!tv.capabilities?.setAVTransportURI || !tv.capabilities?.play)) {
       return { ip: tv.ip, ok: false, error: 'AVTransport SetAVTransportURI and Play capabilities are not verified.' };
@@ -1473,7 +1485,8 @@ ipcMain.handle('samsung-fleet-action-all', async (event, data) => {
       return { ip: tv.ip, ok: false, error: err.message };
     }
   }));
-  return { ok: results.length > 0 && results.every((item) => item.ok), results };
+  const evaluated = results.filter((item) => !item.skipped);
+  return { ok: evaluated.length > 0 && evaluated.every((item) => item.ok), results };
 });
 
 ipcMain.handle('stop-tv-wall', async () => {

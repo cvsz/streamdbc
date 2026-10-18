@@ -2,6 +2,17 @@
 
 All notable StreamDBC changes are recorded here.
 
+## Unreleased
+
+### Added
+
+- Samsung TV remote power in the Windows Control Panel: per-TV and fleet-wide
+  Power Off via the legacy Samsung WebSocket remote (TCP 7676, `KEY_POWER`,
+  post-off LAN confirmation) and Power On via Wake-on-LAN (ARP-sourced MAC,
+  reachability polling). New `client/samsung-fleet-remote.js` module with
+  unit tests covering WebSocket framing, magic packets, ARP parsing and
+  private-LAN validation.
+
 ## 0.6.0 — 2026-10-18
 
 ### Added
