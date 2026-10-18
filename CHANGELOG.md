@@ -2,7 +2,7 @@
 
 All notable StreamDBC changes are recorded here.
 
-## Unreleased — 2026-10-09
+## 0.6.0 — 2026-10-18
 
 ### Added
 
@@ -16,6 +16,10 @@ All notable StreamDBC changes are recorded here.
 
 - Guard Control Panel tray-menu updates during shutdown after the tray has been
   destroyed while the managed server process is exiting.
+- Guarantee Samsung Gateway FFmpeg cleanup when the supervisor exits: deferred
+  cleanup reaps the child through a graceful stdin stop, interrupt, two-second
+  grace, and force kill, guarded by `ProcessState == nil` to avoid a double
+  `Wait`; `Stop()` no longer cancels while holding the state read lock (#50).
 
 ### Validation and release state
 
