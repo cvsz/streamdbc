@@ -53,6 +53,7 @@ func (guard *windowsProcessTreeGuard) Close() error {
 	}
 	handle := guard.handle
 	guard.handle = 0
+	// Close the job object handle to allow FFmpeg to terminate.
 	if err := windows.CloseHandle(handle); err != nil {
 		return fmt.Errorf("close FFmpeg job object: %w", err)
 	}
