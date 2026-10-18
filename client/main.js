@@ -140,6 +140,18 @@ function normalizeServerUrl(value) {
   return parsed.toString().replace(/\/$/, '');
 }
 
+// Renderer-supplied server URLs must never redirect the stored management API
+// key to a different origin. Only the configured server origin is accepted.
+function resolveServerUrl(candidate) {
+  const configured = normalizeServerUrl(settings.serverUrl);
+  if (candidate === undefined || candidate === null || candidate === '') return configured;
+  const requested = normalizeServerUrl(candidate);
+  if (new URL(requested).origin !== new URL(configured).origin) {
+    throw new Error('Server URL does not match the configured management server');
+  }
+  return requested;
+}
+
 async function openTrustedExternal(value) {
   const parsed = new URL(String(value || ''));
   if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com') {
@@ -393,6 +405,7 @@ function createPlayerWindow(streamId) {
   const playerUrl = `file://${path.join(__dirname, 'player.html')}?stream=${encodeURIComponent(streamId)}&server=${encodeURIComponent(settings.serverUrl)}`;
   playerWindow.loadURL(playerUrl);
   playerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  playerWindow.webContents.on('will-navigate', (event) => event.preventDefault());
 
   playerWindow.on('closed', () => {
     playerWindow = null;
@@ -1251,19 +1264,19 @@ ipcMain.handle('save-settings', (event, newSettings) => {
 });
 
 ipcMain.handle('fetch-health', async (event, serverUrl) => {
-  return await fetchHealth(serverUrl || settings.serverUrl);
+  return await fetchHealth(resolveServerUrl(serverUrl));
 });
 
 ipcMain.handle('fetch-streams', async (event, serverUrl) => {
-  return await fetchStreams(serverUrl || settings.serverUrl);
+  return await fetchStreams(resolveServerUrl(serverUrl));
 });
 
 ipcMain.handle('create-stream', async (event, { serverUrl, streamId, name }) => {
-  return await createStream(serverUrl || settings.serverUrl, streamId, name);
+  return await createStream(resolveServerUrl(serverUrl), streamId, name);
 });
 
 ipcMain.handle('delete-stream', async (event, { serverUrl, streamId }) => {
-  return await deleteStream(serverUrl || settings.serverUrl, streamId);
+  return await deleteStream(resolveServerUrl(serverUrl), streamId);
 });
 
 ipcMain.handle('select-workspace', async () => {
@@ -1280,7 +1293,7 @@ ipcMain.handle('select-workspace', async () => {
 });
 
 ipcMain.handle('fetch-samsung-status', async (event, serverUrl) => {
-  return await fetchSamsungStatus(serverUrl || settings.serverUrl);
+  return await fetchSamsungStatus(resolveServerUrl(serverUrl));
 });
 
 ipcMain.handle('get-server-runtime-status', async () => {
@@ -1504,7 +1517,7 @@ ipcMain.handle('stop-tv-wall', async () => {
 });
 
 ipcMain.handle('samsung-action', async (event, { serverUrl, action }) => {
-  return await samsungAction(serverUrl || settings.serverUrl, action);
+  return await samsungAction(resolveServerUrl(serverUrl), action);
 });
 
 ipcMain.handle('run-samsung-task', async (event, task) => {
@@ -1519,7 +1532,7 @@ ipcMain.handle('open-samsung-url', async (event, kind) => {
 });
 
 ipcMain.handle('get-auth-token', async (event, { serverUrl, streamId, action }) => {
-  return await getAuthToken(serverUrl || settings.serverUrl, streamId, action);
+  return await getAuthToken(resolveServerUrl(serverUrl), streamId, action);
 });
 
 ipcMain.handle('open-player', (event, streamId) => {

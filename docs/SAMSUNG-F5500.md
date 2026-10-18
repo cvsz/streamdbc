@@ -144,9 +144,9 @@ Test-NetConnection -ComputerName 127.0.0.1 -Port 8081
 ```
 
 The TV and PC must be on the same subnet. The preferred hostname is
-`ztv.zeaz.dev`, currently mapped to `192.168.1.100`. If the router or TV blocks
+`ztv.zeaz.dev`, currently mapped to `192.168.1.85`. If the router or TV blocks
 a public DNS name resolving to an RFC1918 address, configure split DNS/local DNS
-for `ztv.zeaz.dev -> 192.168.1.100` or use the direct LAN-IP fallback.
+for `ztv.zeaz.dev -> 192.168.1.85` or use the direct LAN-IP fallback.
 Confirm that the active network is
 Private and that the router has no client/AP isolation. If needed, run
 `Test-NetConnection -ComputerName <PC-LAN-IP> -Port 8081` from another Windows
