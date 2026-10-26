@@ -20,13 +20,13 @@
     "full-build-installer": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ../scripts/windows/full-build-installer.ps1"
   },
   "dependencies": {
-    "electron-updater": "^6.3.0",
+    "electron-updater": "^6.8.11",
     "node-fetch": "^3.3.2",
     "hls.js": "1.7.3"
   },
   "devDependencies": {
-    "electron": "^44.7.0",
-    "electron-builder": "^26.15.3",
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0",
     "sprintf-js": "file:patches/sprintf-js"
   },
   "build": {
