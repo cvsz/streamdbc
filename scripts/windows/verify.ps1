@@ -57,7 +57,7 @@ try {
     }
 
     Write-Host "==> [5/8] staticcheck" -ForegroundColor Cyan
-    $env:GOTOOLCHAIN = "go1.27.1"
+    $env:GOTOOLCHAIN = "go1.27.3"
     & go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
     if ($LASTEXITCODE -ne 0) { throw "staticcheck failed." }
 
