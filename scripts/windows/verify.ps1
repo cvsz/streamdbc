@@ -62,7 +62,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "staticcheck failed." }
 
     Write-Host "==> [6/8] gosec" -ForegroundColor Cyan
-    & go run github.com/securego/gosec/v2/cmd/gosec@v2.29.0 ./...
+    $env:GOTOOLCHAIN = "go1.27.3"
+    & go run github.com/securego/gosec/v2/cmd/gosec@v2.30.0 ./...
     if ($LASTEXITCODE -ne 0) { throw "gosec failed." }
 
     Write-Host "==> [7/8] go vet ./..." -ForegroundColor Cyan
