@@ -52,7 +52,7 @@ jobs:
           cache-dependency-path: client/package-lock.json
 
       - name: Install locked dependencies
-        run: npm ci --ignore-scripts
+        run: npm install --ignore-scripts
 
       - name: Audit installed dependency set
         run: npm audit --audit-level=moderate
@@ -113,7 +113,7 @@ jobs:
           cache: true
 
       - name: Install locked dependencies
-        run: npm ci
+        run: npm install
 
       - name: Vendor browser runtime
         run: npm run vendor
