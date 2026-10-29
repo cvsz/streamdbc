@@ -22,12 +22,15 @@ RUN apk add --no-cache ca-certificates tzdata ffmpeg wget && \
     addgroup -g 1000 stremdbc && \
     adduser -D -u 1000 -G stremdbc stremdbc
 
-COPY --from=builder --chown=1000:1000 /out/stremdbc /app/stremdbc
-COPY --from=builder --chown=1000:1000 /src/configs /app/configs
-COPY --from=builder --chown=1000:1000 /src/web /app/web
+# Binary, configs and web assets stay root-owned and read-only for the runtime
+# user so a compromised process cannot replace its own executable or config.
+COPY --from=builder /out/stremdbc /app/stremdbc
+COPY --from=builder /src/configs /app/configs
+COPY --from=builder /src/web /app/web
 
 RUN mkdir -p /tmp/hls /tmp/llhls /tmp/recordings /tmp/dvr && \
-    chown -R stremdbc:stremdbc /tmp/hls /tmp/llhls /tmp/recordings /tmp/dvr /app
+    chown stremdbc:stremdbc /tmp/hls /tmp/llhls /tmp/recordings /tmp/dvr && \
+    chmod -R go-w /app && chmod 0555 /app/stremdbc
 
 USER stremdbc
 

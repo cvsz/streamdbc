@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -591,5 +592,74 @@ func TestLogSafeValueStripsRecordSeparatorsAndBoundsLength(t *testing.T) {
 	}
 	if len([]rune(got)) > maxLogValueRunes+1 {
 		t.Fatalf("logSafeValue returned %d runes, want at most %d plus ellipsis", len([]rune(got)), maxLogValueRunes)
+	}
+}
+
+func TestTrustedProxyIgnoresClientControlledForwardedHops(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.API.TrustedProxies = []string{"192.0.2.1"}
+	server := NewServer(&cfg.API, core.NewStreamRegistry(cfg), metrics.NewMetrics(), zap.NewNop())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+	req.RemoteAddr = "192.0.2.1:12345"
+	// The leftmost entry is attacker-supplied; the proxy appended 198.51.100.7.
+	req.Header.Set("X-Forwarded-For", "203.0.113.9, 198.51.100.7")
+	if got := server.clientIP(req); got != "198.51.100.7" {
+		t.Fatalf("spoofed leftmost X-Forwarded-For hop was trusted: %q", got)
+	}
+	req.Header.Set("X-Forwarded-For", "198.51.100.7, not-an-ip")
+	if got := server.clientIP(req); got != "192.0.2.1" {
+		t.Fatalf("malformed hop should fall back to the proxy address, got %q", got)
+	}
+}
+
+func TestRateKeyGroupsIPv6Prefix(t *testing.T) {
+	if a, b := rateKey("2001:db8:1:2::1"), rateKey("2001:db8:1:2:ffff::9"); a != b {
+		t.Fatalf("addresses in one /64 produced different keys: %q vs %q", a, b)
+	}
+	if rateKey("2001:db8:1:3::1") == rateKey("2001:db8:1:2::1") {
+		t.Fatal("different /64 prefixes must not share a key")
+	}
+	if got := rateKey("198.51.100.20"); got != "198.51.100.20" {
+		t.Fatalf("IPv4 key changed: %q", got)
+	}
+}
+
+func TestRateLimiterMemoryIsBounded(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.API.RateLimitPerMinute = 1000
+	server := NewServer(&cfg.API, core.NewStreamRegistry(cfg), metrics.NewMetrics(), zap.NewNop())
+	for i := 0; i < maxRateEntries+1000; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+		req.RemoteAddr = fmt.Sprintf("[2001:db8:%x:%x::1]:1234", i>>16, i&0xffff)
+		server.Handler().ServeHTTP(httptest.NewRecorder(), req)
+	}
+	server.rateMu.Lock()
+	size := len(server.rateEntries)
+	server.rateMu.Unlock()
+	if size > maxRateEntries {
+		t.Fatalf("rate limiter retained %d entries, cap is %d", size, maxRateEntries)
+	}
+}
+
+func TestTokenCanBindToExplicitIP(t *testing.T) {
+	server := newTestServer(t)
+	manager, err := auth.NewManager("0123456789abcdef0123456789abcdef0123456789abcdef", "15m", []string{"secret-key-123456"}, false)
+	if err != nil {
+		t.Fatalf("new auth manager: %v", err)
+	}
+	server.SetAuthManager(manager)
+	post := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-API-Key", "secret-key-123456")
+		res := httptest.NewRecorder()
+		server.Handler().ServeHTTP(res, req)
+		return res
+	}
+	if res := post(`{"stream_id":"demo","action":"publish","ip":"198.51.100.40"}`); res.Code != http.StatusCreated {
+		t.Fatalf("explicit IP binding rejected: %d %s", res.Code, res.Body.String())
+	}
+	if res := post(`{"stream_id":"demo","action":"publish","ip":"not-an-ip"}`); res.Code != http.StatusBadRequest {
+		t.Fatalf("invalid IP accepted: %d %s", res.Code, res.Body.String())
 	}
 }

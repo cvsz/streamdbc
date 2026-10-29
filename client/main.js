@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const os = require('os');
 const { discoverFleetDetailed, getTVState, hydrateKnownDescription, runTVAction } = require('./samsung-fleet');
 const { applyProbeResults, mergeKnownAndDiscovered, probeKnownFleet, validateLanMediaUrl } = require('./samsung-fleet-inventory');
+const { powerOffTV, powerOnTV } = require('./samsung-fleet-remote');
 const { runHlsSmokeTest } = require('./hls-smoke');
 const { createBeforeQuitHandler, handleWindowClose, handleWindowAllClosed, terminateManagedProcessTree, getUnexpectedManagedProcessExitError } = require('./window-lifecycle');
 
@@ -137,6 +138,18 @@ function normalizeServerUrl(value) {
     throw new Error('Server URL must be HTTP(S) without embedded credentials');
   }
   return parsed.toString().replace(/\/$/, '');
+}
+
+// Renderer-supplied server URLs must never redirect the stored management API
+// key to a different origin. Only the configured server origin is accepted.
+function resolveServerUrl(candidate) {
+  const configured = normalizeServerUrl(settings.serverUrl);
+  if (candidate === undefined || candidate === null || candidate === '') return configured;
+  const requested = normalizeServerUrl(candidate);
+  if (new URL(requested).origin !== new URL(configured).origin) {
+    throw new Error('Server URL does not match the configured management server');
+  }
+  return requested;
 }
 
 async function openTrustedExternal(value) {
@@ -392,6 +405,7 @@ function createPlayerWindow(streamId) {
   const playerUrl = `file://${path.join(__dirname, 'player.html')}?stream=${encodeURIComponent(streamId)}&server=${encodeURIComponent(settings.serverUrl)}`;
   playerWindow.loadURL(playerUrl);
   playerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  playerWindow.webContents.on('will-navigate', (event) => event.preventDefault());
 
   playerWindow.on('closed', () => {
     playerWindow = null;
@@ -1250,19 +1264,19 @@ ipcMain.handle('save-settings', (event, newSettings) => {
 });
 
 ipcMain.handle('fetch-health', async (event, serverUrl) => {
-  return await fetchHealth(serverUrl || settings.serverUrl);
+  return await fetchHealth(resolveServerUrl(serverUrl));
 });
 
 ipcMain.handle('fetch-streams', async (event, serverUrl) => {
-  return await fetchStreams(serverUrl || settings.serverUrl);
+  return await fetchStreams(resolveServerUrl(serverUrl));
 });
 
 ipcMain.handle('create-stream', async (event, { serverUrl, streamId, name }) => {
-  return await createStream(serverUrl || settings.serverUrl, streamId, name);
+  return await createStream(resolveServerUrl(serverUrl), streamId, name);
 });
 
 ipcMain.handle('delete-stream', async (event, { serverUrl, streamId }) => {
-  return await deleteStream(serverUrl || settings.serverUrl, streamId);
+  return await deleteStream(resolveServerUrl(serverUrl), streamId);
 });
 
 ipcMain.handle('select-workspace', async () => {
@@ -1279,7 +1293,7 @@ ipcMain.handle('select-workspace', async () => {
 });
 
 ipcMain.handle('fetch-samsung-status', async (event, serverUrl) => {
-  return await fetchSamsungStatus(serverUrl || settings.serverUrl);
+  return await fetchSamsungStatus(resolveServerUrl(serverUrl));
 });
 
 ipcMain.handle('get-server-runtime-status', async () => {
@@ -1402,6 +1416,9 @@ ipcMain.handle('samsung-fleet-action', async (event, data) => {
   if (!tv) return { ok: false, error: 'TV is not in the current discovered Samsung fleet.' };
   try {
     let value = data?.value;
+    if (data?.action === 'power-off' || data?.action === 'power-on') {
+      return data.action === 'power-off' ? await powerOffTV(tv) : await powerOnTV(tv);
+    }
     if (data?.action === 'play-url' || data?.action === 'open-browser') {
       value = validateLanMediaUrl(value, getLanIPv4Candidates().map((lan) => lan.address));
     }
@@ -1455,6 +1472,14 @@ ipcMain.handle('samsung-fleet-action-all', async (event, data) => {
     return { ok: results.length > 0 && results.every((item) => item.ok), results };
   }
   const results = await Promise.all(samsungFleet.map(async (tv) => {
+    if (data?.action === 'power-off') {
+      if (!tv.online) return { ip: tv.ip, ok: false, skipped: true, error: 'TV already appears offline.' };
+      return { ip: tv.ip, ...(await powerOffTV(tv)) };
+    }
+    if (data?.action === 'power-on') {
+      if (tv.online) return { ip: tv.ip, ok: false, skipped: true, error: 'TV is already online.' };
+      return { ip: tv.ip, ...(await powerOnTV(tv)) };
+    }
     if (!tv.online) return { ip: tv.ip, ok: false, error: 'TV is offline or no allowlisted port responded.' };
     if (data?.action === 'play-url' && (!tv.capabilities?.setAVTransportURI || !tv.capabilities?.play)) {
       return { ip: tv.ip, ok: false, error: 'AVTransport SetAVTransportURI and Play capabilities are not verified.' };
@@ -1473,7 +1498,8 @@ ipcMain.handle('samsung-fleet-action-all', async (event, data) => {
       return { ip: tv.ip, ok: false, error: err.message };
     }
   }));
-  return { ok: results.length > 0 && results.every((item) => item.ok), results };
+  const evaluated = results.filter((item) => !item.skipped);
+  return { ok: evaluated.length > 0 && evaluated.every((item) => item.ok), results };
 });
 
 ipcMain.handle('stop-tv-wall', async () => {
@@ -1491,7 +1517,7 @@ ipcMain.handle('stop-tv-wall', async () => {
 });
 
 ipcMain.handle('samsung-action', async (event, { serverUrl, action }) => {
-  return await samsungAction(serverUrl || settings.serverUrl, action);
+  return await samsungAction(resolveServerUrl(serverUrl), action);
 });
 
 ipcMain.handle('run-samsung-task', async (event, task) => {
@@ -1506,7 +1532,7 @@ ipcMain.handle('open-samsung-url', async (event, kind) => {
 });
 
 ipcMain.handle('get-auth-token', async (event, { serverUrl, streamId, action }) => {
-  return await getAuthToken(serverUrl || settings.serverUrl, streamId, action);
+  return await getAuthToken(resolveServerUrl(serverUrl), streamId, action);
 });
 
 ipcMain.handle('open-player', (event, streamId) => {

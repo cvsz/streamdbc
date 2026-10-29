@@ -144,9 +144,9 @@ Test-NetConnection -ComputerName 127.0.0.1 -Port 8081
 ```
 
 The TV and PC must be on the same subnet. The preferred hostname is
-`ztv.zeaz.dev`, currently mapped to `192.168.1.100`. If the router or TV blocks
+`ztv.zeaz.dev`, currently mapped to `192.168.1.85`. If the router or TV blocks
 a public DNS name resolving to an RFC1918 address, configure split DNS/local DNS
-for `ztv.zeaz.dev -> 192.168.1.100` or use the direct LAN-IP fallback.
+for `ztv.zeaz.dev -> 192.168.1.85` or use the direct LAN-IP fallback.
 Confirm that the active network is
 Private and that the router has no client/AP isolation. If needed, run
 `Test-NetConnection -ComputerName <PC-LAN-IP> -Port 8081` from another Windows
@@ -313,3 +313,25 @@ evidence for:
 
 See [`SAMSUNG-CURRENT-STATUS.md`](SAMSUNG-CURRENT-STATUS.md) for the evidence
 boundaries and the ordered close-fix, Live Browser, fleet and soak checklist.
+
+## 10. Remote power from the Control Panel
+
+The Samsung fleet table offers Power Off and Power On per TV, plus
+fleet-wide buttons with a confirmation prompt.
+
+- **Power Off** sends `KEY_POWER` through the legacy Samsung WebSocket remote
+  on TCP 7676 — the same port the TVs advertise their UPnP description on.
+  The first Power Off attempt on a TV may raise an on-screen access prompt;
+  accept it once per TV and press Power Off again
+  (`REMOTE_AUTH_REQUIRED`). After the key is delivered the panel probes the
+  TV ports: all closed reports `POWER_OFF_CONFIRMED`; ports still open report
+  `POWER_OFF_SENT` because network standby keeps the LAN stack reachable.
+- **Power On** sends Wake-on-LAN magic packets to `255.255.255.255:9` using
+  the MAC recorded in the Windows ARP table, then polls the TV ports for up
+  to 45 seconds: `POWER_ON_CONFIRMED` on the first answering port;
+  `POWER_ON_TIMEOUT` otherwise — enable **Wake On LAN / Power On With Mobile**
+  on the TV, and wake each TV once with its physical remote after firmware
+  updates or long outages so the PC re-learns the MAC (`ARP_MISSING`).
+
+Playback resume after Power On still requires Discover/Refresh and the usual
+browser or HDMI flows; remote power does not verify picture or audio.

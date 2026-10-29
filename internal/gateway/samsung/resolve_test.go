@@ -27,6 +27,10 @@ func TestResolveFFmpegFallsBackToManagedBuild(t *testing.T) {
 	localAppData := t.TempDir()
 	t.Setenv("LOCALAPPDATA", localAppData)
 	t.Setenv("PATH", t.TempDir())
+	// The STREMDBC_FFMPEG_PATH override (used by the bundled Control Panel
+	// runtime and the rebuild script) must not leak into this test: a managed
+	// LOCALAPPDATA build wins regardless of ambient overrides.
+	t.Setenv("STREMDBC_FFMPEG_PATH", "")
 
 	root := filepath.Join(localAppData, "StreamDBC", "FFmpeg")
 	older := filepath.Join(root, "7.1-x64")
@@ -50,8 +54,13 @@ func TestResolveFFmpegFallsBackToManagedBuild(t *testing.T) {
 }
 
 func TestResolveFFmpegReturnsEmptyWithoutManagedBuild(t *testing.T) {
+	// Neutralize every ambient FFmpeg source: the resolved LOCALAPPDATA root
+	// is empty, PATH points to a directory without executables, and the
+	// explicit STREMDBC_FFMPEG_PATH override is cleared. Only then does an
+	// empty result prove nothing was resolvable.
 	t.Setenv("LOCALAPPDATA", t.TempDir())
 	t.Setenv("PATH", t.TempDir())
+	t.Setenv("STREMDBC_FFMPEG_PATH", "")
 
 	if got := resolveFFmpeg("ffmpeg"); got != "" {
 		t.Fatalf("resolveFFmpeg = %q, want empty when no FFmpeg exists anywhere", got)

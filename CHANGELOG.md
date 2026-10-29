@@ -2,7 +2,40 @@
 
 All notable StreamDBC changes are recorded here.
 
-## Unreleased — 2026-10-09
+## 0.6.1 — 2026-10-18
+
+### Added
+
+- Samsung TV remote power in the Windows Control Panel: per-TV and fleet-wide
+  Power Off via the legacy Samsung WebSocket remote (TCP 7676, `KEY_POWER`,
+  post-off LAN confirmation) and Power On via Wake-on-LAN (ARP-sourced MAC,
+  reachability polling). New `client/samsung-fleet-remote.js` module with
+  unit tests covering WebSocket framing, magic packets, ARP parsing and
+  private-LAN validation.
+
+### Security
+
+- Control Panel IPC handlers no longer forward the stored management API key
+  to a renderer-supplied origin: every management request now resolves against
+  the configured server only.
+- `X-Forwarded-For` is honoured only from configured trusted proxies and is
+  parsed right-to-left, so client-controlled hops can no longer spoof the
+  per-client rate limiter or IP-bound token validation.
+- Rate limiter memory is hard-capped at 65,536 entries, IPv6 sources are
+  grouped by /64, and expired-entry sweeps run at most every 30 seconds.
+- Web player: removed the third-party ad script and pinned hls.js 1.5.17 with
+  a SHA-384 subresource-integrity hash; the player window now rejects
+  top-level navigation.
+- Docker runtime: `/app` stays root-owned and read-only for the service user;
+  compose adds log rotation, resource limits, a Redis healthcheck and dropped
+  container capabilities.
+- `/auth/token` accepts an optional explicit `ip` so a token minted on an
+  admin machine validates on an encoder on a different LAN address; the
+  default IP binding behaviour is unchanged.
+- README: fixed stray literal `\n` sequences so the hardening lists render
+  correctly.
+
+## 0.6.0 — 2026-10-18
 
 ### Added
 
@@ -16,6 +49,10 @@ All notable StreamDBC changes are recorded here.
 
 - Guard Control Panel tray-menu updates during shutdown after the tray has been
   destroyed while the managed server process is exiting.
+- Guarantee Samsung Gateway FFmpeg cleanup when the supervisor exits: deferred
+  cleanup reaps the child through a graceful stdin stop, interrupt, two-second
+  grace, and force kill, guarded by `ProcessState == nil` to avoid a double
+  `Wait`; `Stop()` no longer cancels while holding the state read lock (#50).
 
 ### Validation and release state
 

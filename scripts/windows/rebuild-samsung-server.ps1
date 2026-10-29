@@ -15,6 +15,19 @@ try {
     $go = Get-Command go -ErrorAction SilentlyContinue
     if (-not $go) { throw "Go is not installed or not on PATH." }
 
+    if (-not $SkipTests) {
+        # Run the suite before the bundled-FFmpeg environment is configured:
+        # the FFmpeg resolution tests must observe a neutral environment, not
+        # the STREMDBC_FFMPEG_PATH override this script installs afterwards.
+        Write-Host "Running Go tests..." -ForegroundColor Cyan
+        & go test -count=1 ./...
+        if ($LASTEXITCODE -ne 0) { throw "go test ./... failed." }
+
+        Write-Host "Running go vet..." -ForegroundColor Cyan
+        & go vet ./...
+        if ($LASTEXITCODE -ne 0) { throw "go vet ./... failed." }
+    }
+
     Write-Host "Preparing verified bundled FFmpeg x64..." -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot "prepare-bundled-ffmpeg.ps1")
     if ($LASTEXITCODE -ne 0) { throw "Bundled FFmpeg preparation failed." }
@@ -22,16 +35,6 @@ try {
     $resolvedFFmpeg = Get-SamsungTVFFmpegPath -Requested "ffmpeg"
     if (-not $resolvedFFmpeg) { throw "FFmpeg could not be resolved after preparation." }
     $env:STREMDBC_FFMPEG_PATH = $resolvedFFmpeg
-
-    if (-not $SkipTests) {
-        Write-Host "Running Go tests..." -ForegroundColor Cyan
-        & go test ./...
-        if ($LASTEXITCODE -ne 0) { throw "go test ./... failed." }
-
-        Write-Host "Running go vet..." -ForegroundColor Cyan
-        & go vet ./...
-        if ($LASTEXITCODE -ne 0) { throw "go vet ./... failed." }
-    }
 
     $exe = Join-Path $repoRoot "stremdbc.exe"
     if (Test-Path -LiteralPath $exe) {
