@@ -77,6 +77,34 @@ vMix RTMP destination is not evidence that media reaches the Samsung gateway.
 Verify the exact running executable and configuration before relying on RTMP
 ingest.
 
+### Automated setup on another Windows PC
+
+Copy the **entire** repository folder onto the new PC and run the installer as
+that PC's normal Windows user (not from WSL). It reuses a working Windows
+`stremdbc.exe` or installs Go 1.27+ with WinGet and builds one, installs a full
+FFmpeg build if missing, generates credentials only when no gateway or saved
+credentials exist, and saves them with per-user Windows DPAPI. It requests UAC
+approval **only** for a Private-profile TCP 8081 firewall rule, registers a
+logon task, and starts the gateway in headless mode.
+
+```powershell
+cd C:\path\to\streamdbc
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\samsung-tv-setup.ps1 -PlanOnly
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\samsung-tv-setup.ps1
+```
+
+Use `-Offline` to refuse downloads, `-SkipAutostart` to avoid creating a task,
+`-SkipFirewall` to defer the UAC/firewall step, or `-SkipStart` to install without
+launching the gateway. To open the control panel later, run
+`powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\scripts\windows\samsung-tv-run-8081.ps1`.
+**Do not move the repository folder after registering the task**; reinstall if
+its location changes. The encrypted credential file is tied to the Windows
+user and cannot be copied to another PC. If an existing gateway is running,
+provide its original credentials instead of rotating keys. The installer does
+not install or license vMix: start vMix and enable External Output 1 before
+expecting live video. The PC must use a trusted Private network; the installer
+will not silently change a Public network profile.
+
 ## 2. Enable vMix External Output
 
 The vMix guide calls the main control **External**. Click the gear/cog next to
@@ -130,8 +158,31 @@ profile only. Remove it with:
 ```
 
 The gateway starts with the server because `samsung_tv.enable` is true in the
-sample profile. Startup waits for FFmpeg to create a readable playlist and
-retries the source with bounded exponential backoff if FFmpeg exits.
+sample profile. The starter script waits for FFmpeg to create a readable playlist;
+the gateway retries the source with bounded exponential backoff if FFmpeg exits.
+
+### Optional Windows control panel (single start script)
+
+When TCP 8080 is unavailable, allow inbound TCP 8081 on the Private firewall
+profile. The panel uses port 8081 by default; if the sample config still has
+`server.http_port: 8080`, it generates a per-user 8081 copy under
+`%LOCALAPPDATA%\StreamDBC` without editing the original file. Then, in
+PowerShell with `STREMDBC_JWT_SECRET` and `STREMDBC_API_KEY` set to the same
+values used by any running server:
+
+```powershell
+.\scripts\windows\samsung-tv-run-8081.ps1
+```
+
+The single script starts StreamDBC if necessary and opens a WinForms panel with
+live status, Start/Stop/Restart, a local HLS test, and PC preview links. It does
+not rewrite your configuration or stop StreamDBC when the panel closes. For a
+headless scheduled task, use `-NoGui`; re-run
+`scripts/windows/samsung-tv-install-autostart.ps1 -Port 8081` to register that
+mode and store credentials encrypted to the current Windows user (DPAPI).
+Previously registered tasks may still launch the panel until reinstalled.
+Keep vMix External Output active. The panel cannot turn on the television,
+launch its browser, or force the F5500 browser into fullscreen.
 
 ## 4. Find the Windows LAN IP
 

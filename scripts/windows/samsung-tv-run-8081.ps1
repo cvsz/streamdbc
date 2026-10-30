@@ -1,17 +1,214 @@
-[CmdletBinding()] param([int]$Port=8081)
-$ErrorActionPreference='Stop'
-$repoRoot=(Resolve-Path (Join-Path $PSScriptRoot '..\..')).ProviderPath
-$cfg=Join-Path $repoRoot 'configs\samsung-f5500.yaml'
+# Run from any directory: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\scripts\windows\samsung-tv-run-8081.ps1
+# -NoGui is intended for the scheduled task. Closing the window does not stop the server.
+[CmdletBinding()]
+param(
+    [ValidateRange(1, 65535)][int]$Port = 8081,
+    [switch]$NoGui
+)
 
-# Point yaml at 8081 (8080 is bound on this PC).
-$raw = Get-Content -LiteralPath $cfg -Raw
-$raw = $raw -replace 'http_port:\s*8080', ('http_port: {0}' -f $Port)
-Set-Content -LiteralPath $cfg -Value $raw -NoNewline
+$ErrorActionPreference = 'Stop'
+if ($env:OS -ne 'Windows_NT') { throw 'This control panel requires Windows and vMix DirectShow devices.' }
 
-if ($env:STREMDBC_JWT_SECRET.Length -lt 32){ $env:STREMDBC_JWT_SECRET=((New-Guid).Guid+(New-Guid).Guid) }
-if ([string]::IsNullOrWhiteSpace($env:STREMDBC_API_KEY)){ $env:STREMDBC_API_KEY=((New-Guid).Guid+(New-Guid).Guid) }
+$script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).ProviderPath
+$script:configPath = Join-Path $script:repoRoot 'configs\samsung-f5500.yaml'
+$script:executable = Join-Path $script:repoRoot 'stremdbc.exe'
+$script:baseUrl = "http://127.0.0.1:$Port"
+$script:logBox = $null
 
-& (Join-Path $PSScriptRoot 'samsung-tv-doctor.ps1') -Port $Port -AllowPortInUse
-if ($LASTEXITCODE -ne 0){ throw 'doctor failed' }
-& (Join-Path $PSScriptRoot 'samsung-tv-start.ps1') -Port $Port
-& (Join-Path $PSScriptRoot 'samsung-tv-test.ps1') -Port $Port
+# The optional scheduled task stores credentials encrypted for the current Windows user.
+# Never generate new keys on launch: they would not authorize an already-running server.
+$credentialsFile = Join-Path $env:LOCALAPPDATA 'StreamDBC\tv-credentials.dat'
+if (($NoGui -or $env:STREMDBC_JWT_SECRET.Length -lt 32 -or [string]::IsNullOrWhiteSpace($env:STREMDBC_API_KEY)) -and
+    (Test-Path -LiteralPath $credentialsFile -PathType Leaf)) {
+    $encrypted = @(Get-Content -LiteralPath $credentialsFile)
+    if ($encrypted.Count -ne 2) { throw 'Invalid saved TV credentials; reinstall the scheduled task.' }
+    $storedSecret = ([System.Management.Automation.PSCredential]::new('tv', (ConvertTo-SecureString $encrypted[0]))).GetNetworkCredential().Password
+    $storedKey = ([System.Management.Automation.PSCredential]::new('tv', (ConvertTo-SecureString $encrypted[1]))).GetNetworkCredential().Password
+    if ($NoGui -or $env:STREMDBC_JWT_SECRET.Length -lt 32) { $env:STREMDBC_JWT_SECRET = $storedSecret }
+    if ($NoGui -or [string]::IsNullOrWhiteSpace($env:STREMDBC_API_KEY)) { $env:STREMDBC_API_KEY = $storedKey }
+}
+
+function Write-PanelLog {
+    param([string]$Message)
+    $line = '[{0}] {1}' -f (Get-Date -Format 'HH:mm:ss'), $Message
+    if ($null -ne $script:logBox) { $script:logBox.AppendText("$line`r`n") }
+    else { Write-Host $line }
+}
+
+function Get-GatewayStatus {
+    try {
+        $status = Invoke-RestMethod -Uri "$script:baseUrl/api/v1/tv/status" -TimeoutSec 2
+    } catch {
+        return $null
+    }
+    if ($status.enabled -ne $true -or $status.profile -notlike 'f5500_*') {
+        throw 'A different service or StreamDBC profile is listening on this port.'
+    }
+    return $status
+}
+
+function Assert-APIKey {
+    if ([string]::IsNullOrWhiteSpace($env:STREMDBC_API_KEY)) {
+        throw 'Set STREMDBC_API_KEY in this PowerShell session to control an existing gateway.'
+    }
+}
+
+function Invoke-GatewayAction {
+    param([ValidateSet('start', 'stop', 'restart')][string]$Action)
+    $status = Get-GatewayStatus
+    if ($null -eq $status) { throw "Gateway is not listening on $script:baseUrl." }
+    if ($Action -eq 'start' -and $status.state -in @('live', 'starting', 'restarting')) {
+        Write-PanelLog 'Gateway already running.'
+        return
+    }
+    Assert-APIKey
+    $null = Invoke-RestMethod -Uri "$script:baseUrl/api/v1/tv/$Action" -Method Post -Headers @{ 'X-API-Key' = $env:STREMDBC_API_KEY } -ContentType 'application/json' -Body '{}' -TimeoutSec 15
+    Write-PanelLog "Gateway $Action accepted."
+}
+
+function Assert-StartPrerequisites {
+    if (-not (Test-Path -LiteralPath $script:executable -PathType Leaf)) {
+        throw "Missing $script:executable. Build it on Windows: go build -o stremdbc.exe ./cmd/stremdbc"
+    }
+    if (-not (Test-Path -LiteralPath $script:configPath -PathType Leaf)) { throw "Missing $script:configPath" }
+    $contents = Get-Content -LiteralPath $script:configPath -Raw
+    $portMatch = [regex]::Match($contents, '(?m)^\s*http_port:\s*(\d+)\s*(?:#.*)?$')
+    if (-not $portMatch.Success) { throw "Cannot read server.http_port from $script:configPath" }
+    if ($env:STREMDBC_JWT_SECRET.Length -lt 32 -or [string]::IsNullOrWhiteSpace($env:STREMDBC_API_KEY)) {
+        throw 'Set STREMDBC_JWT_SECRET (32+ characters) and STREMDBC_API_KEY before starting the server. Credentials are not generated by this panel.'
+    }
+    if ([int]$portMatch.Groups[1].Value -eq $Port) { return $script:configPath }
+    if ($portMatch.Groups[1].Value -ne '8080') {
+        throw "Config uses port $($portMatch.Groups[1].Value), but this panel uses $Port. Pass -Port $($portMatch.Groups[1].Value) or adjust the config."
+    }
+    # For the shipped 8080 profile, use a per-user copy so no tracked YAML is edited.
+    $runtimeDirectory = Join-Path $env:LOCALAPPDATA 'StreamDBC'
+    [IO.Directory]::CreateDirectory($runtimeDirectory) | Out-Null
+    $runtimeConfig = Join-Path $runtimeDirectory "samsung-f5500-$Port.yaml"
+    $updated = $contents.Remove($portMatch.Groups[1].Index, $portMatch.Groups[1].Length).Insert($portMatch.Groups[1].Index, [string]$Port)
+    [IO.File]::WriteAllText($runtimeConfig, $updated, (New-Object System.Text.UTF8Encoding($false)))
+    return $runtimeConfig
+}
+
+function Start-Gateway {
+    $status = Get-GatewayStatus
+    if ($null -ne $status) {
+        Invoke-GatewayAction -Action start
+        return
+    }
+    $startConfig = Assert-StartPrerequisites
+    Write-PanelLog "Starting StreamDBC at $script:baseUrl (config: $startConfig) ..."
+    # Quote only the config argument: Start-Process combines the array into a Windows command line.
+    $process = Start-Process -FilePath $script:executable -ArgumentList @('-config', ('"{0}"' -f $startConfig)) -WorkingDirectory $script:repoRoot -PassThru
+    for ($attempt = 0; $attempt -lt 45; $attempt++) {
+        $process.Refresh()
+        if ($process.HasExited) { throw "StreamDBC exited with code $($process.ExitCode). Run stremdbc.exe -config `"$startConfig`" in a terminal for the error." }
+        $status = Get-GatewayStatus
+        if ($null -ne $status) { Write-PanelLog "StreamDBC listening (PID $($process.Id)); gateway $($status.state)."; return }
+        Start-Sleep -Seconds 1
+    }
+    throw "Timed out waiting for $script:baseUrl. Check the configured port and Windows firewall."
+}
+
+function Test-GatewayHLS {
+    $status = Get-GatewayStatus
+    if ($null -eq $status -or $status.state -ne 'live' -or -not $status.playlist_ready) {
+        throw 'Gateway is not live and playlist-ready. Check vMix External Output and last_error.'
+    }
+    $playlist = Invoke-WebRequest -Uri "$script:baseUrl/tv/live/index.m3u8" -UseBasicParsing -TimeoutSec 10
+    if ($playlist.StatusCode -ne 200) { throw "Playlist returned HTTP $($playlist.StatusCode)." }
+    $text = if ($playlist.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($playlist.Content) } else { [string]$playlist.Content }
+    $segment = [regex]::Match($text, '(?m)^(segment_[0-9]{6,}\.ts)\r?$')
+    if (-not $segment.Success) { throw 'Playlist contains no MPEG-TS segment.' }
+    $response = Invoke-WebRequest -Uri "$script:baseUrl/tv/live/$($segment.Groups[1].Value)" -UseBasicParsing -TimeoutSec 10
+    if ($response.StatusCode -ne 200) { throw "Segment returned HTTP $($response.StatusCode)." }
+    Write-PanelLog "HLS OK: playlist and $($segment.Groups[1].Value) (HTTP 200)."
+}
+
+function Get-LanAddress {
+    $candidate = Get-NetIPConfiguration -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPv4Address -and $_.IPv4DefaultGateway -and $_.InterfaceAlias -notmatch 'Loopback|WSL|Hyper-V|VirtualBox|VMware|Docker|Tailscale|Teredo' } |
+        Select-Object -First 1
+    if ($null -ne $candidate) { return $candidate.IPv4Address.IPAddress }
+    return '127.0.0.1'
+}
+
+if ($NoGui) {
+    Start-Gateway
+    Write-PanelLog "TV URL: http://$(Get-LanAddress):$Port/tv"
+    return
+}
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
+    throw 'Launch with powershell.exe -STA (Windows Forms requires a single-threaded apartment).'
+}
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'StreamDBC - Samsung TV'
+$form.Size = [Drawing.Size]::new(560, 375)
+$form.StartPosition = 'CenterScreen'
+$form.Font = [Drawing.Font]::new('Segoe UI', 9)
+
+$script:statusLabel = New-Object System.Windows.Forms.Label
+$script:statusLabel.SetBounds(12, 12, 525, 26)
+$form.Controls.Add($script:statusLabel)
+$script:tvURL = "http://$(Get-LanAddress):$Port/tv"
+$urlLabel = New-Object System.Windows.Forms.Label
+$urlLabel.SetBounds(12, 42, 525, 28)
+$urlLabel.Text = "TV: $script:tvURL"
+$form.Controls.Add($urlLabel)
+
+$script:logBox = New-Object System.Windows.Forms.TextBox
+$script:logBox.SetBounds(12, 152, 520, 170)
+$script:logBox.Multiline = $true
+$script:logBox.ReadOnly = $true
+$script:logBox.ScrollBars = 'Vertical'
+$script:logBox.Font = [Drawing.Font]::new('Consolas', 9)
+$form.Controls.Add($script:logBox)
+
+function Add-PanelButton {
+    param([string]$Text, [int]$X, [int]$Y, [scriptblock]$OnClick)
+    $button = New-Object System.Windows.Forms.Button
+    $button.Text = $Text
+    $button.SetBounds($X, $Y, 95, 32)
+    $button.Add_Click($OnClick)
+    $form.Controls.Add($button)
+}
+
+function Update-PanelStatus {
+    try {
+        $status = Get-GatewayStatus
+        if ($null -eq $status) { throw 'Gateway offline' }
+        $script:statusLabel.Text = "Gateway: $($status.state) | Playlist: $($status.playlist_ready) | Restarts: $($status.restart_count)"
+        $script:statusLabel.ForeColor = if ($status.state -eq 'live' -and $status.playlist_ready) { [Drawing.Color]::ForestGreen } else { [Drawing.Color]::DarkOrange }
+        if ($status.last_error -and $status.last_error -ne $script:lastError) {
+            Write-PanelLog "FFmpeg: $($status.last_error)"
+            $script:lastError = $status.last_error
+        }
+    } catch {
+        $script:statusLabel.Text = "Gateway: offline on port $Port"
+        $script:statusLabel.ForeColor = [Drawing.Color]::Firebrick
+    }
+}
+
+Add-PanelButton 'Start' 12 76 { try { Start-Gateway } catch { Write-PanelLog "Start failed: $_" }; Update-PanelStatus }
+Add-PanelButton 'Stop' 117 76 { try { Invoke-GatewayAction -Action stop } catch { Write-PanelLog "Stop failed: $_" }; Update-PanelStatus }
+Add-PanelButton 'Restart' 222 76 { try { Invoke-GatewayAction -Action restart } catch { Write-PanelLog "Restart failed: $_" }; Update-PanelStatus }
+Add-PanelButton 'PC preview' 327 76 { try { Start-Process $script:tvURL } catch { Write-PanelLog "Browser failed: $_" } }
+Add-PanelButton 'HLS link' 432 76 { try { Start-Process "$script:tvURL/live/index.m3u8" } catch { Write-PanelLog "Browser failed: $_" } }
+Add-PanelButton 'Test HLS' 12 115 { try { Test-GatewayHLS } catch { Write-PanelLog "Test failed: $_" } }
+Add-PanelButton 'Refresh' 117 115 { Update-PanelStatus }
+
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 5000
+$timer.Add_Tick({ Update-PanelStatus })
+$form.Add_Shown({
+    Update-PanelStatus
+    try { Start-Gateway } catch { Write-PanelLog "Start failed: $_" }
+    Update-PanelStatus
+    $timer.Start()
+})
+$form.Add_FormClosed({ $timer.Stop(); $timer.Dispose() })
+[void]$form.ShowDialog()

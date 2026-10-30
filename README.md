@@ -155,6 +155,23 @@ See [`docs/SINGLE-CONTROL-PANEL.md`](docs/SINGLE-CONTROL-PANEL.md) and
 
 This performs dependency installation, Go tests, npm audit, JavaScript syntax checks, Zeazdev `apps.ico` generation, bundled FFmpeg/server runtime preparation, NSIS + portable builds, and writes `client\dist\SHA256SUMS.txt` plus `build-manifest.json`.
 
+### One-command Samsung TV setup on another Windows PC
+
+Copy the complete repository to the Windows PC that hosts vMix, then preview
+and run the setup script from a normal PowerShell session:
+
+```powershell
+.\scripts\windows\samsung-tv-setup.ps1 -PlanOnly
+.\scripts\windows\samsung-tv-setup.ps1
+```
+
+The script can install Go and FFmpeg, build `stremdbc.exe`, save credentials
+with Windows DPAPI, request approval for a Private-profile TCP 8081 firewall
+rule, and register per-user logon startup. vMix still requires a licensed
+installation and External Output setup. See
+[`docs/SAMSUNG-F5500.md`](docs/SAMSUNG-F5500.md) for setup details and
+limitations.
+
 ## Docker Compose
 
 The production-oriented sample requires injected secrets and exposes host
