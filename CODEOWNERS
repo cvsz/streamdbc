@@ -1,0 +1,35 @@
+# CODEOWNERS — StreamDBC Repository
+# ตามหลักการกำกับดูแล: cvsz = repository owner, policedbc = independent review
+
+# Default owners for everything
+*       @cvsz
+
+# Go backend - management API, auth, config, core
+/internal/api/        @cvsz
+/internal/auth/       @cvsz
+/internal/config/     @cvsz
+/internal/core/       @cvsz
+
+# Samsung TV gateway
+/internal/gateway/samsung/   @cvsz
+
+# Windows control panel and scripts
+/client/              @cvsz
+/scripts/windows/     @cvsz
+
+# Android TV client
+/client/tv/           @cvsz
+
+# Web frontend
+/web/                 @cvsz
+
+# CI/CD and workflows
+/.github/workflows/   @cvsz
+
+# Documentation
+/docs/                @cvsz
+README.md             @cvsz
+CHANGELOG.md          @cvsz
+
+# Independent review identity
+# policedbc is the designated independent reviewer for Pull Requests
