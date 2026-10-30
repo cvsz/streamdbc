@@ -8,9 +8,9 @@ if ([string]::IsNullOrWhiteSpace($Destination)) {
     $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).ProviderPath
     $Destination = Join-Path $repoRoot "client\vendor\ffmpeg"
 }
-$tag = "autobuild-2026-10-05-13-07"
-$asset = "ffmpeg-n9.0.2-22-g46d8f462ee-win64-gpl-9.0.zip"
-$sha256 = "1385d57bd30c009fca25655f056680317dc9db3724cf082443bf8830223877cf"
+$tag = "latest"
+$asset = "ffmpeg-master-latest-win64-gpl.zip"
+$sha256 = "972353c4f65297b3ff1bfb8e6426ef04188c8883346797acdd3cd17fc2017c6b"
 $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$asset"
 
 $ffmpegExe = Join-Path $Destination "ffmpeg.exe"
