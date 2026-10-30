@@ -819,7 +819,7 @@ func (c *Config) Validate() error {
 		}
 	}
 	if c.Auth.Enable {
-		if strings.TrimSpace(c.Auth.JWTSecret) != c.Auth.JWTSecret || len(c.Auth.JWTSecret) < 32 {
+		if strings.TrimSpace(c.Auth.JWTSecret) != c.Auth.JWTSecret || len(c.Auth.JWTSecret) < 32 || strings.Contains(c.Auth.JWTSecret, "${") {
 			return fmt.Errorf("auth.jwt_secret must be at least 32 characters when auth is enabled")
 		}
 		expiry, err := time.ParseDuration(c.Auth.JWTExpiry)
@@ -834,7 +834,7 @@ func (c *Config) Validate() error {
 		}
 		seenKeys := make(map[string]struct{}, len(c.Auth.APIKeys))
 		for _, key := range c.Auth.APIKeys {
-			if key == "" || strings.TrimSpace(key) != key || strings.ContainsAny(key, "\r\n\x00\t") {
+			if key == "" || strings.TrimSpace(key) != key || strings.ContainsAny(key, "\r\n\x00\t") || strings.Contains(key, "${") {
 				return fmt.Errorf("auth.api_keys contains an invalid key")
 			}
 			if _, exists := seenKeys[key]; exists {

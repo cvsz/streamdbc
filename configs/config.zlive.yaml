@@ -7,6 +7,9 @@ server:
   stream_ttl: 24h
 
 rtmp:
+  # Control/handshake only; audio/video is rejected. Do not push encoders here.
+  # For vMix use External Output -> DirectShow vMix Video/Audio -> Samsung HLS
+  # (configs/samsung-f5500.yaml, docs/SAMSUNG-F5500.md).
   enable: true
   host: "0.0.0.0"
   port: 1935
