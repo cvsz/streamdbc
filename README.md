@@ -276,6 +276,8 @@ client/samsung-fleet.js discovery-driven Samsung UPnP fleet controller
 client/tv/               native Android TV RTSP client
 deployments/             deployment assets
 .github/workflows/       CI and CodeQL definitions
+AGENTS.md                AI agent context and workflow guidance
+CODEOWNERS               repository code ownership and review routing
 ```
 
 ## Release gates
