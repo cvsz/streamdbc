@@ -2,6 +2,49 @@
 
 All notable StreamDBC changes are recorded here.
 
+## 0.6.2 — 2026-10-31
+
+### Added
+
+- `AGENTS.md`: AI agent context, directory structure, verification commands,
+  CI workflow summary, security notes, and git workflow guidance.
+- `CODEOWNERS`: repository code ownership and review routing for the merge
+  governance workflow (cvsz owner, policedbc independent reviewer).
+- README project structure table now includes AGENTS.md and CODEOWNERS.
+
+### Security
+
+- Upgraded Go toolchain from 1.27.2 to 1.27.3 across all CI workflows,
+  CodeQL, Windows Server Build, Desktop, Samsung TV, and Dockerfile builder
+  image, resolving crypto/x509 vulnerability GO-2026-6809 /
+  CVE-2026-111943 (Man-in-the-middle via untrusted intermediate
+  certificates).
+- Resolved npm audit vulnerabilities in client dependencies:
+  electron (high), fast-uri (moderate), undici (high); 0 vulnerabilities
+  remain after fix.
+- Switched desktop CI from `npm ci` to `npm install` for client dependencies
+  to support `file:` dependencies (sprintf-js local patch).
+
+### Fixed
+
+- Updated FFmpeg download URL in `scripts/windows/prepare-bundled-ffmpeg.ps1`
+  from the retired `autobuild-2026-10-05-13-07` tag to the `latest` tag with
+  matching SHA256 hash verification, fixing the Windows installer and portable
+  build CI check (previous pinned build returned HTTP 404).
+- Documented the one-command Windows Samsung TV gateway setup flow
+  (`scripts/windows/samsung-tv-setup.ps1`): PlanOnly preview, firewall rule
+  approval, DPAPI credential storage, logon autostart task, and offline/skip
+  flags. Updated README quick start and SAMSUNG-F5500 operational guide.
+
+### Validation
+
+- `make verify` passes: gofmt, go mod verify, go mod tidy -diff,
+  `go test -race -count=1 ./...` (23/23 packages), staticcheck, gosec
+  (0 issues), go vet, binary build.
+- All CI checks on PR #63 pass: Analyze Go, Build Windows stremdbc.exe,
+  Container build, Go and synthetic HLS compatibility, Go test/vet/build,
+  npm audit and package checks, Windows installer and portable build.
+
 ## 0.6.1 — 2026-10-18
 
 ### Added
