@@ -8,6 +8,7 @@
 *.test
 *.prof
 coverage.out
+coverage.html
 cover.out
 /stremdbc
 bin/
